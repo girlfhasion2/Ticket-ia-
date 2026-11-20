@@ -1,0 +1,10 @@
+{
+  "name": "TicketSplit AI",
+  "description": "Gestión inteligente de gastos y reparto de tickets offline-first con soporte OCR.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
