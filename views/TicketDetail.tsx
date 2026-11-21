@@ -10,6 +10,40 @@ import {
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
 
+const UnitsStepper: React.FC<{
+  value: number;
+  canIncrease: boolean;
+  onChange: (value: number) => void;
+}> = ({ value, canIncrease, onChange }) => (
+  <div className="flex items-center gap-2">
+    <button
+      type="button"
+      aria-label="Quitar una unidad"
+      disabled={value <= 1}
+      onClick={() => onChange(value - 1)}
+      className="w-9 h-9 rounded-xl border-[1.5px] border-indigo-200 bg-indigo-50 text-indigo-600 text-lg font-black active-scale disabled:opacity-30"
+    >
+      −
+    </button>
+    <input
+      type="number"
+      inputMode="numeric"
+      value={value}
+      onChange={(e) => onChange(parseInt(e.target.value) || 0)}
+      className="w-12 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
+    <button
+      type="button"
+      aria-label="Añadir una unidad"
+      disabled={!canIncrease}
+      onClick={() => onChange(value + 1)}
+      className="w-9 h-9 rounded-xl border-[1.5px] border-indigo-200 bg-indigo-50 text-indigo-600 text-lg font-black active-scale disabled:opacity-30"
+    >
+      +
+    </button>
+  </div>
+);
+
 interface TicketDetailProps {
   ticketId: string;
   initialTicket?: Ticket;
@@ -902,7 +936,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                  <div className="flex items-center justify-between mb-4">
                                    <div className="flex flex-col">
                                      <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
-                                     <input type="number" value={asgn.units} onChange={(e) => updateAssignment(line.id, asgn.id, { units: parseInt(e.target.value) || 0 })} className="w-12 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none" />
+                                     <UnitsStepper
+                                       value={asgn.units}
+                                       canIncrease={line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity}
+                                       onChange={(v) => updateAssignment(line.id, asgn.id, { units: v })}
+                                     />
                                    </div>
                                    <button onClick={() => deleteAssignment(line.id, asgn.id)} className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl">
                                      <Trash2 size={18} />
@@ -1121,11 +1159,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex flex-col">
                             <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
-                            <input
-                              type="number"
+                            <UnitsStepper
                               value={asgn.units}
-                              onChange={e => updateAssignment(line.id, asgn.id, { units: parseInt(e.target.value) || 0 })}
-                              className="w-14 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none"
+                              canIncrease={line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity}
+                              onChange={v => updateAssignment(line.id, asgn.id, { units: v })}
                             />
                           </div>
                           <button
