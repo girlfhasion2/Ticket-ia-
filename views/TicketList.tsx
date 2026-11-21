@@ -3,6 +3,7 @@ import { db } from '../db';
 import { Ticket, Category, TicketSortConfig, TicketStatus } from '../types';
 import CategoryManagerModal from '../components/CategoryManagerModal';
 import SortTicketsModal from '../components/SortTicketsModal';
+import { computeRepartoCompleto, shareTicket } from '../utils/ticketShare';
 import {
   Calendar,
   Store,
@@ -18,6 +19,7 @@ import {
   MoreVertical,
   CreditCard,
   RotateCcw,
+  Share2,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -57,6 +59,7 @@ const TicketList: React.FC<TicketListProps> = ({
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -233,6 +236,19 @@ const TicketList: React.FC<TicketListProps> = ({
       setPendingDeleteIds(null);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleShare = async (ticket: Ticket) => {
+    setOpenMenuId(null);
+    try {
+      await shareTicket(ticket);
+      if (!navigator.share) {
+        setShareToast('Resumen copiado al portapapeles');
+        setTimeout(() => setShareToast(null), 2500);
+      }
+    } catch {
+      // El usuario canceló el share — no es un error
     }
   };
 
@@ -591,9 +607,9 @@ const TicketList: React.FC<TicketListProps> = ({
                           {openMenuId === ticket.id && (
                             <div
                               onPointerDown={(e) => e.stopPropagation()}
-                              className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[180px] py-2 overflow-hidden"
+                              className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[190px] py-2 overflow-hidden"
                             >
-                              {(!ticket.status || ticket.status === 'borrador') && (
+                              {(!ticket.status || ticket.status === 'borrador') && computeRepartoCompleto(ticket) && (
                                 <button
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
@@ -604,14 +620,24 @@ const TicketList: React.FC<TicketListProps> = ({
                                 </button>
                               )}
                               {ticket.status === 'repartido' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
-                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
-                                >
-                                  <Check size={16} />
-                                  Marcar como pagado
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleShare(ticket); }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                  >
+                                    <Share2 size={16} />
+                                    Compartir resumen
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
+                                  >
+                                    <Check size={16} />
+                                    Marcar como pagado
+                                  </button>
+                                </>
                               )}
                               {ticket.status === 'pagado' && (
                                 <button
@@ -731,9 +757,9 @@ const TicketList: React.FC<TicketListProps> = ({
                       {openMenuId === ticket.id && (
                         <div
                           onPointerDown={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[180px] py-2 overflow-hidden"
+                          className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[190px] py-2 overflow-hidden"
                         >
-                          {(!ticket.status || ticket.status === 'borrador') && (
+                          {(!ticket.status || ticket.status === 'borrador') && computeRepartoCompleto(ticket) && (
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
@@ -744,14 +770,24 @@ const TicketList: React.FC<TicketListProps> = ({
                             </button>
                           )}
                           {ticket.status === 'repartido' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
-                            >
-                              <Check size={16} />
-                              Marcar como pagado
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleShare(ticket); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
+                              >
+                                <Share2 size={16} />
+                                Compartir resumen
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
+                              >
+                                <Check size={16} />
+                                Marcar como pagado
+                              </button>
+                            </>
                           )}
                           {ticket.status === 'pagado' && (
                             <button
@@ -884,6 +920,13 @@ const TicketList: React.FC<TicketListProps> = ({
         onClose={() => setShowSortModal(false)}
         onApply={(nextSort) => setSortConfig(nextSort)}
       />
+
+      {/* Toast de copiado al portapapeles (fallback cuando no hay navigator.share) */}
+      {shareToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] bg-gray-900 text-white text-xs font-bold px-5 py-3 rounded-2xl shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+          {shareToast}
+        </div>
+      )}
     </div>
   );
 };
