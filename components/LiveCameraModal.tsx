@@ -18,12 +18,15 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const requestIdRef = useRef(0);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
   const stopStream = useCallback(() => {
+    requestIdRef.current += 1;
+    const hadStream = Boolean(streamRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -31,50 +34,127 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    return hadStream;
   }, []);
 
   const startCamera = useCallback(
     async (mode: 'environment' | 'user') => {
-      stopStream();
+      const hadActiveStream = stopStream();
+      const currentRequestId = requestIdRef.current;
+
       setCameraError(null);
       setIsStarting(true);
 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setIsStarting(false);
-        setCameraError(
-          'Tu navegador no permite streaming de cámara en directo aquí. Puedes usar la cámara nativa del dispositivo o elegir una foto de tu galería.'
-        );
+        if (requestIdRef.current === currentRequestId) {
+          setIsStarting(false);
+          setCameraError(
+            'Tu navegador no permite streaming de cámara en directo aquí. Puedes usar la cámara nativa del dispositivo o elegir una foto de tu galería.'
+          );
+        }
         return;
       }
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+      if (hadActiveStream) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        if (requestIdRef.current !== currentRequestId) return;
+      }
+
+      const constraintCandidates: MediaStreamConstraints[] = [
+        {
           video: {
             facingMode: { ideal: mode },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
           },
           audio: false,
-        });
-        streamRef.current = stream;
+        },
+        {
+          video: {
+            facingMode: { ideal: mode },
+          },
+          audio: false,
+        },
+        {
+          video: true,
+          audio: false,
+        },
+      ];
+
+      let acquiredStream: MediaStream | null = null;
+      let lastError: unknown = null;
+
+      for (let i = 0; i < constraintCandidates.length; i++) {
+        if (requestIdRef.current !== currentRequestId) return;
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia(constraintCandidates[i]);
+          if (requestIdRef.current !== currentRequestId) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+          acquiredStream = stream;
+          break;
+        } catch (err: any) {
+          lastError = err;
+          const errName = err?.name || '';
+          if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+            break;
+          }
+          if (i < constraintCandidates.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+      }
+
+      if (requestIdRef.current !== currentRequestId) {
+        if (acquiredStream) {
+          acquiredStream.getTracks().forEach((track) => track.stop());
+        }
+        return;
+      }
+
+      if (acquiredStream) {
+        streamRef.current = acquiredStream;
         if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+          videoRef.current.srcObject = acquiredStream;
           await videoRef.current.play().catch(() => {});
         }
-      } catch (err: any) {
-        console.error('Live camera error:', err);
-        if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
-          setCameraError(
-            'Permiso de cámara denegado. Permite el acceso a la cámara o selecciona una foto desde la galería.'
-          );
-        } else {
-          setCameraError(
-            'No se pudo iniciar la cámara en directo en este dispositivo. Puedes usar la cámara nativa o subir una foto de la galería.'
-          );
+        if (requestIdRef.current === currentRequestId) {
+          setIsStarting(false);
         }
-      } finally {
-        setIsStarting(false);
+        return;
       }
+
+      const errAny = lastError as { name?: string; message?: string } | null;
+      const errName = errAny?.name || '';
+      const errMsg = (errAny?.message || '').toLowerCase();
+      console.warn('Live camera unavailable:', errName || errMsg || 'Unknown camera error');
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setCameraError(
+          'Permiso de cámara denegado. Permite el acceso a la cámara o selecciona una foto desde la galería.'
+        );
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setCameraError(
+          'No se encontró ninguna cámara disponible en este dispositivo. Puedes usar la cámara nativa o elegir una foto de la galería.'
+        );
+      } else if (
+        errName === 'NotReadableError' ||
+        errName === 'TrackStartError' ||
+        errName === 'AbortError' ||
+        errMsg.includes('videosource') ||
+        errMsg.includes('allocate')
+      ) {
+        setCameraError(
+          'No se pudo acceder a la fuente de vídeo (la cámara puede estar ocupada o no disponible en este entorno). Usa la cámara del dispositivo o sube una foto de la galería.'
+        );
+      } else {
+        setCameraError(
+          'No se pudo iniciar la cámara en directo en este dispositivo. Puedes usar la cámara nativa o subir una foto de la galería.'
+        );
+      }
+      setIsStarting(false);
     },
     [stopStream]
   );
@@ -84,11 +164,12 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
       stopStream();
       setCapturedPreview(null);
       setCameraError(null);
+      setIsStarting(false);
       return;
     }
 
     if (!capturedPreview) {
-      startCamera(facingMode);
+      void startCamera(facingMode);
     }
 
     return () => {
@@ -178,8 +259,9 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  stopStream();
                   onOpenNativeCamera();
+                  onClose();
                 }}
                 className="w-full py-3.5 px-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 active-scale"
               >
@@ -189,8 +271,9 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  stopStream();
                   onOpenGallery();
+                  onClose();
                 }}
                 className="w-full py-3.5 px-4 bg-white/10 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 active-scale"
               >
@@ -256,8 +339,9 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  stopStream();
                   onOpenGallery();
+                  onClose();
                 }}
                 className="flex flex-col items-center gap-1 text-white/80 hover:text-white active-scale px-3 py-1"
               >
@@ -280,8 +364,9 @@ const LiveCameraModal: React.FC<LiveCameraModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
+                  stopStream();
                   onOpenNativeCamera();
+                  onClose();
                 }}
                 className="flex flex-col items-center gap-1 text-white/80 hover:text-white active-scale px-3 py-1"
               >

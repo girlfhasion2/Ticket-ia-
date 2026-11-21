@@ -6,7 +6,7 @@ import { parseTicketImage } from '../geminiService';
 import { 
   ArrowLeft, Camera, Images, Trash2, Plus, Users, 
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
-  Maximize2, Sparkles
+  Maximize2, Sparkles, MessageCircle
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
@@ -24,6 +24,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
   const [newParticipantName, setNewParticipantName] = useState("");
   const [showCameraModal, setShowCameraModal] = useState(false);
   const [showImageLightbox, setShowImageLightbox] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
@@ -64,10 +67,21 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
         assignments: []
       }));
 
+      const cleanedParsedMerchant =
+        parsed.merchant && parsed.merchant.trim() && parsed.merchant.trim().toLowerCase() !== 'null'
+          ? parsed.merchant.trim()
+          : '';
+      const cleanedTargetMerchant =
+        targetTicket.merchant &&
+        targetTicket.merchant.trim() &&
+        targetTicket.merchant.trim().toLowerCase() !== 'null'
+          ? targetTicket.merchant.trim()
+          : '';
+
       const nextTicket: Ticket = {
         ...targetTicket,
         imageBase64: base64Image,
-        merchant: parsed.merchant?.trim() || targetTicket.merchant,
+        merchant: cleanedParsedMerchant || cleanedTargetMerchant,
         lines: newLines,
         discardedLines: []
       };
@@ -216,10 +230,17 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
     saveTicketAndSyncTotal({ ...ticket, participants, lines });
   };
 
-  const deleteTicket = async () => {
-    if (window.confirm(`¿Seguro que quieres borrar el ticket de ${ticket.merchant}?`)) {
-      await db.tickets.delete(ticketId);
+  const handleConfirmDelete = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await db.tickets.delete(ticket.id);
+      setShowDeleteConfirm(false);
       onBack();
+    } catch (err: any) {
+      setDeleteError(err?.message || 'No se pudo eliminar el ticket.');
+      setIsDeleting(false);
     }
   };
 
@@ -259,35 +280,98 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
   };
 
   const userTotals: { [key: string]: number } = {};
-  ticket.participants.forEach(p => userTotals[p.id] = 0);
-  const pendingAssignments: { description: string, units: number }[] = [];
+  const personAssignedItems: Record<string, { description: string; amount: number }[]> = {};
+  ticket.participants.forEach((p) => {
+    userTotals[p.id] = 0;
+    personAssignedItems[p.id] = [];
+  });
+  const pendingAssignments: { description: string; units: number }[] = [];
 
-  ticket.lines.forEach(line => {
-    const unitsAssignedToPeople = line.assignments.reduce((sum, a) => a.personIds.length > 0 ? sum + a.units : sum, 0);
+  ticket.lines.forEach((line) => {
+    const unitsAssignedToPeople = line.assignments.reduce(
+      (sum, a) => (a.personIds.length > 0 ? sum + a.units : sum),
+      0
+    );
     const lineRemaining = line.quantity - unitsAssignedToPeople;
-    if (lineRemaining > 0) pendingAssignments.push({ description: line.description, units: lineRemaining });
-    line.assignments.forEach(asgn => {
-      if (asgn.personIds.length === 0) return;
+    if (lineRemaining > 0) {
+      pendingAssignments.push({ description: line.description, units: lineRemaining });
+    }
+    line.assignments.forEach((asgn) => {
+      if (asgn.personIds.length === 0 || asgn.units <= 0) return;
       const groupTotal = asgn.units * line.unitPrice;
       const perPerson = groupTotal / asgn.personIds.length;
-      asgn.personIds.forEach(pId => userTotals[pId] = (userTotals[pId] || 0) + perPerson);
+      const itemLabel =
+        asgn.units > 1 ? `${line.description} (×${asgn.units})` : line.description;
+      asgn.personIds.forEach((pId) => {
+        userTotals[pId] = (userTotals[pId] || 0) + perPerson;
+        if (!personAssignedItems[pId]) personAssignedItems[pId] = [];
+        personAssignedItems[pId].push({
+          description: itemLabel,
+          amount: perPerson,
+        });
+      });
     });
   });
 
   const totalRepartido = Object.values(userTotals).reduce((a, b) => a + b, 0);
-  const isRepartoCompleto = pendingAssignments.length === 0 && Math.abs(totalRepartido - ticket.totalAmount) < 0.01;
+  const isRepartoCompleto =
+    pendingAssignments.length === 0 && Math.abs(totalRepartido - ticket.totalAmount) < 0.01;
+
+  const merchantDisplayName =
+    ticket.merchant && ticket.merchant.trim() && ticket.merchant.trim().toLowerCase() !== 'null'
+      ? ticket.merchant.trim()
+      : 'Sin nombre';
+
+  const merchantInputValue =
+    ticket.merchant && ticket.merchant.toLowerCase() !== 'null' ? ticket.merchant : '';
+
+  const participantsWithItems = ticket.participants.filter(
+    (p) => (personAssignedItems[p.id]?.length || 0) > 0
+  );
+  const hasAssignedItems = participantsWithItems.length > 0;
+
+  const whatsappUrl = (() => {
+    if (!hasAssignedItems) return '';
+    const sections: string[] = [
+      `🧾 *${merchantDisplayName}*`,
+      `📅 ${ticket.date}`,
+    ];
+
+    participantsWithItems.forEach((p) => {
+      const items = personAssignedItems[p.id] || [];
+      const personLines = items.map(
+        (item) => `  • ${item.description} — ${item.amount.toFixed(2)}€`
+      );
+      const total = (userTotals[p.id] || 0).toFixed(2);
+      sections.push(
+        '',
+        [`👤 *${p.name}*`, ...personLines, `  *Total: ${total}€*`].join('\n')
+      );
+    });
+
+    sections.push('', `💰 *Total ticket: ${ticket.totalAmount.toFixed(2)}€*`);
+    return `https://wa.me/?text=${encodeURIComponent(sections.join('\n'))}`;
+  })();
 
   return (
     <div className="flex flex-col h-full bg-white">
       <header className="p-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-20">
-        <button onClick={onBack} className="p-3 -ml-2 text-gray-500 hover:text-indigo-600 active-scale">
+        <button type="button" onClick={onBack} className="p-3 -ml-2 text-gray-500 hover:text-indigo-600 active-scale">
           <ArrowLeft size={24} />
         </button>
         <div className="flex-1 px-2 text-center overflow-hidden">
-          <h2 className="font-black truncate text-gray-900 leading-tight">{ticket.merchant}</h2>
+          <h2 className="font-black truncate text-gray-900 leading-tight">{merchantDisplayName}</h2>
           <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{ticket.date}</p>
         </div>
-        <button onClick={deleteTicket} className="p-3 -mr-2 text-red-400 hover:text-red-600 active-scale">
+        <button
+          type="button"
+          onClick={() => {
+            setDeleteError(null);
+            setShowDeleteConfirm(true);
+          }}
+          aria-label="Eliminar ticket"
+          className="p-3 -mr-2 text-red-400 hover:text-red-600 active-scale"
+        >
           <Trash2 size={24} />
         </button>
       </header>
@@ -313,7 +397,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
             <div className="bg-gray-50 p-5 rounded-2xl space-y-5 border border-gray-100 shadow-inner">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Establecimiento</label>
-                <input type="text" value={ticket.merchant} onChange={(e) => saveTicketAndSyncTotal({...ticket, merchant: e.target.value})} className="w-full bg-transparent border-b border-gray-200 py-1 font-bold text-xl text-indigo-900 focus:outline-none focus:border-indigo-500 transition-colors" />
+                <input type="text" placeholder="Sin nombre" value={merchantInputValue} onChange={(e) => saveTicketAndSyncTotal({...ticket, merchant: e.target.value})} className="w-full bg-transparent border-b border-gray-200 py-1 font-bold text-xl text-indigo-900 focus:outline-none focus:border-indigo-500 transition-colors" />
               </div>
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-1">
@@ -404,7 +488,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
                   >
                     <img
                       src={ticket.imageBase64}
-                      alt={`Ticket de ${ticket.merchant}`}
+                      alt={`Ticket de ${merchantDisplayName}`}
                       className="w-full max-h-96 object-contain mx-auto"
                     />
                     {isProcessing && (
@@ -697,6 +781,18 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
                 })}
               </div>
             </div>
+
+            {hasAssignedItems && (
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-emerald-200 active-scale transition-colors"
+              >
+                <MessageCircle size={20} />
+                Compartir por WhatsApp
+              </a>
+            )}
           </div>
         )}
       </div>
@@ -730,10 +826,68 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
           <div className="flex-1 flex items-center justify-center overflow-auto">
             <img
               src={ticket.imageBase64}
-              alt={`Ticket de ${ticket.merchant}`}
+              alt={`Ticket de ${merchantDisplayName}`}
               className="max-w-full max-h-full object-contain rounded-xl"
               onClick={(e) => e.stopPropagation()}
             />
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirm && (
+        <div
+          onClick={() => !isDeleting && setShowDeleteConfirm(false)}
+          className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-sm rounded-3xl shadow-2xl border border-gray-100 p-6 space-y-5"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <Trash2 size={22} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-gray-900">
+                  Confirmar eliminación
+                </h3>
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  ¿Eliminar este ticket? Esta acción no se puede deshacer.
+                </p>
+              </div>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-medium text-red-700">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 py-3 px-4 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-black uppercase tracking-widest active-scale disabled:opacity-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="flex-1 py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-red-200 active-scale disabled:opacity-50 transition-colors"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw size={15} className="animate-spin" />
+                    Borrando...
+                  </>
+                ) : (
+                  'Eliminar'
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

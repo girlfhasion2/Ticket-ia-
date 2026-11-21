@@ -2,7 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -158,6 +158,7 @@ function extractJsonText(rawText: string): string {
 async function generateTicketExtraction(
   ai: GoogleGenAI,
   model: string,
+  thinkingLevel: ThinkingLevel,
   mimeType: string,
   base64Data: string
 ) {
@@ -177,6 +178,7 @@ async function generateTicketExtraction(
     config: {
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
+      thinkingConfig: { thinkingLevel },
     },
   });
 
@@ -218,8 +220,16 @@ app.post("/api/parse-ticket", async (req, res) => {
     });
 
     const modelsToTry = [
-      { model: "gemini-4-hydrogen", retries: 2 },
-      { model: "gemini-3.1-flash-lite", retries: 1 },
+      {
+        model: "gemini-3.1-flash-lite",
+        retries: 1,
+        thinkingLevel: ThinkingLevel.MINIMAL,
+      },
+      {
+        model: "gemini-4-hydrogen",
+        retries: 1,
+        thinkingLevel: ThinkingLevel.LOW,
+      },
     ];
 
     let lastError: any = null;
@@ -230,6 +240,7 @@ app.post("/api/parse-ticket", async (req, res) => {
           const parsed = await generateTicketExtraction(
             ai,
             candidate.model,
+            candidate.thinkingLevel,
             mimeType,
             base64Data
           );

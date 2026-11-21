@@ -145,6 +145,20 @@ class SupabaseTicketsStore {
     }
   }
 
+  async deleteMany(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client
+      .from('tickets')
+      .delete()
+      .in('id', ids)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw formatDbError('eliminar los tickets', error);
+    }
+  }
+
   async clear(): Promise<void> {
     const { client, userId } = await getReadyClientAndUserId();
     const { error } = await client

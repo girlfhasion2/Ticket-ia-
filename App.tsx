@@ -13,15 +13,18 @@ const App: React.FC = () => {
   const { user, loading } = useAuth();
   const [view, setView] = useState<AppState['view']>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
+  const [isListSelectionMode, setIsListSelectionMode] = useState(false);
 
   useEffect(() => {
     if (!user) {
       setView('list');
       setSelectedTicketId(undefined);
+      setIsListSelectionMode(false);
     }
   }, [user]);
 
   const navigateToTicket = (id: string) => {
+    setIsListSelectionMode(false);
     setSelectedTicketId(id);
     setView('detail');
   };
@@ -68,7 +71,13 @@ const App: React.FC = () => {
   const renderView = () => {
     switch (view) {
       case 'list':
-        return <TicketList onSelectTicket={navigateToTicket} onCreateTicket={createNewTicket} />;
+        return (
+          <TicketList
+            onSelectTicket={navigateToTicket}
+            onCreateTicket={createNewTicket}
+            onSelectionModeChange={setIsListSelectionMode}
+          />
+        );
       case 'detail':
         return selectedTicketId ? (
           <TicketDetail 
@@ -79,7 +88,13 @@ const App: React.FC = () => {
       case 'settings':
         return <Settings />;
       default:
-        return <TicketList onSelectTicket={navigateToTicket} onCreateTicket={createNewTicket} />;
+        return (
+          <TicketList
+            onSelectTicket={navigateToTicket}
+            onCreateTicket={createNewTicket}
+            onSelectionModeChange={setIsListSelectionMode}
+          />
+        );
     }
   };
 
@@ -89,7 +104,7 @@ const App: React.FC = () => {
         {renderView()}
       </main>
 
-      {view !== 'detail' && (
+      {view !== 'detail' && !(view === 'list' && isListSelectionMode) && (
         <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-12 py-3 flex justify-between items-center z-50">
           <button 
             onClick={() => setView('list')}
