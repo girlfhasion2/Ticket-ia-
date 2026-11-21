@@ -637,6 +637,14 @@ const TicketList: React.FC<TicketListProps> = ({
                                     <Check size={16} />
                                     Marcar como pagado
                                   </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                                  >
+                                    <RotateCcw size={16} />
+                                    Reabrir ticket
+                                  </button>
                                 </>
                               )}
                               {ticket.status === 'pagado' && (
@@ -786,6 +794,14 @@ const TicketList: React.FC<TicketListProps> = ({
                               >
                                 <Check size={16} />
                                 Marcar como pagado
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                              >
+                                <RotateCcw size={16} />
+                                Reabrir ticket
                               </button>
                             </>
                           )}
