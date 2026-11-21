@@ -69,6 +69,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [pendingLineModal, setPendingLineModal] = useState<string | null>(null);
+  const [personDetailModal, setPersonDetailModal] = useState<string | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
   const isPersistedRef = useRef<boolean>(!initialTicket);
@@ -401,6 +402,17 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
       return ` (×${rem}/${d})`;
     }
     return ` (×${whole}+${rem}/${d})`;
+  };
+
+  const formatShareText = (num: number, den: number): string => {
+    const g = gcd(num, den);
+    const n = num / g;
+    const d = den / g;
+    const whole = Math.floor(n / d);
+    const rem = n % d;
+    if (rem === 0) return `${whole}`;
+    if (whole === 0) return `${rem}/${d}`;
+    return `${whole} + ${rem}/${d}`;
   };
 
   const userTotals: { [key: string]: number } = {};
@@ -1010,13 +1022,13 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   const amount = userTotals[p.id] || 0;
                   const share = totalRepartido > 0 ? (amount / totalRepartido) * 100 : 0;
                   return (
-                    <div key={p.id} className="bg-white p-6 rounded-3xl border border-gray-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+                    <button type="button" key={p.id} onClick={() => setPersonDetailModal(p.id)} className="w-full text-left bg-white p-6 rounded-3xl border border-gray-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow active-scale">
                       <div className="flex items-center gap-5">
                         <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner">{p.name[0].toUpperCase()}</div>
                         <div><p className="font-black text-gray-900 text-xl tracking-tight leading-none mb-1">{p.name}</p><p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{share.toFixed(0)}% del reparto</p></div>
                       </div>
                       <p className="text-3xl font-black text-gray-900 tracking-tighter tabular-nums">{amount.toFixed(2)}€</p>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1103,6 +1115,60 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
           </div>
         )}
       </div>
+
+      {/* Modal: detalle de productos de una persona (Resumen) */}
+      {personDetailModal && (() => {
+        const person = ticket.participants.find(p => p.id === personDetailModal);
+        if (!person) return null;
+        const items = Array.from(personAssignedItems[person.id]?.values() || []);
+        const total = userTotals[person.id] || 0;
+        return (
+          <div
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => setPersonDetailModal(null)}
+          >
+            <div
+              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-5 flex justify-between items-center text-white bg-indigo-900">
+                <div className="min-w-0 mr-3">
+                  <h4 className="font-black text-lg truncate">{person.name}</h4>
+                  <p className="text-[11px] opacity-70 font-bold uppercase tracking-widest">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPersonDetailModal(null)}
+                  className="p-1.5 bg-white/20 hover:bg-white/30 rounded-xl transition-colors shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1">
+                {items.length === 0 ? (
+                  <p className="text-center py-10 text-gray-400 font-bold text-sm">Sin productos asignados</p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {items.map((it, i) => (
+                      <li key={i} className="py-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-black text-gray-900 text-sm uppercase truncate">{it.description}</p>
+                          <p className="text-[11px] text-gray-400 font-bold">{formatShareText(it.num, it.den)} ud{it.num / it.den > 1 ? 's' : ''}</p>
+                        </div>
+                        <p className="font-black text-gray-900 tabular-nums shrink-0">{it.amount.toFixed(2)}€</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="p-5 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total</span>
+                <span className="text-2xl font-black text-gray-900 tabular-nums">{total.toFixed(2)}€</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Mini modal: repartir producto pendiente desde Resumen */}
       {pendingLineModal && (() => {
