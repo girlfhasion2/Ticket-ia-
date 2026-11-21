@@ -1,26 +1,60 @@
 import React, { useState } from 'react';
 import { useAuth } from '../src/contexts/AuthContext';
-import { Receipt, Mail, Lock, LogIn, UserPlus, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { supabase, supabaseReady } from '../src/lib/supabase';
+import { Receipt, Mail, Lock, LogIn, UserPlus, AlertCircle, CheckCircle2, RefreshCw, KeyRound } from 'lucide-react';
 
 const Auth: React.FC = () => {
   const { signIn, signUp, isConfigured } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const toggleMode = () => {
-    setMode((prev) => (prev === 'login' ? 'register' : 'login'));
+  const switchMode = (nextMode: 'login' | 'register' | 'forgot') => {
+    setMode(nextMode);
     setError(null);
     setNotice(null);
+  };
+
+  const toggleMode = () => {
+    switchMode(mode === 'login' ? 'register' : 'login');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setNotice(null);
+
+    if (mode === 'forgot') {
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail) {
+        setError('Introduce tu email.');
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        await supabaseReady;
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+          trimmedEmail,
+          {
+            redirectTo: window.location.origin + '/reset-password',
+          }
+        );
+        if (resetError) {
+          setError(resetError.message);
+        } else {
+          setNotice('Te hemos enviado un enlace de recuperación. Revisa tu email.');
+        }
+      } catch (err: any) {
+        setError(err?.message || 'Ha ocurrido un error inesperado.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     if (!email.trim() || !password) {
       setError('Introduce tu email y contraseña.');
@@ -78,7 +112,9 @@ const Auth: React.FC = () => {
             <p className="text-sm text-gray-500 mt-1">
               {mode === 'login'
                 ? 'Inicia sesión para acceder a tus tickets en la nube'
-                : 'Crea una cuenta para guardar y repartir tus tickets'}
+                : mode === 'register'
+                ? 'Crea una cuenta para guardar y repartir tus tickets'
+                : 'Recupera el acceso a tu cuenta con tu email'}
             </p>
           </div>
         </div>
@@ -122,31 +158,44 @@ const Auth: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label
-                htmlFor="auth-password"
-                className="text-[10px] font-black text-gray-400 uppercase tracking-widest block px-1"
-              >
-                Contraseña
-              </label>
-              <div className="relative">
-                <Lock
-                  size={18}
-                  className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-                />
-                <input
-                  id="auth-password"
-                  type="password"
-                  required
-                  minLength={6}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-gray-50 rounded-xl pl-11 pr-4 py-3 text-sm font-medium text-gray-900 border border-gray-200 focus:border-indigo-500 focus:bg-white focus:outline-none transition-colors"
-                />
+            {mode !== 'forgot' && (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="auth-password"
+                  className="text-[10px] font-black text-gray-400 uppercase tracking-widest block px-1"
+                >
+                  Contraseña
+                </label>
+                <div className="relative">
+                  <Lock
+                    size={18}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
+                  <input
+                    id="auth-password"
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-gray-50 rounded-xl pl-11 pr-4 py-3 text-sm font-medium text-gray-900 border border-gray-200 focus:border-indigo-500 focus:bg-white focus:outline-none transition-colors"
+                  />
+                </div>
+                {mode === 'login' && (
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={() => switchMode('forgot')}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
             {error && (
               <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-2.5 text-red-700 text-xs font-medium leading-relaxed">
@@ -172,6 +221,11 @@ const Auth: React.FC = () => {
                   <RefreshCw size={18} className="animate-spin" />
                   Procesando...
                 </>
+              ) : mode === 'forgot' ? (
+                <>
+                  <KeyRound size={18} />
+                  Enviar enlace de recuperación
+                </>
               ) : mode === 'login' ? (
                 <>
                   <LogIn size={18} />
@@ -187,15 +241,25 @@ const Auth: React.FC = () => {
           </form>
 
           <div className="pt-2 border-t border-gray-100 text-center">
-            <button
-              type="button"
-              onClick={toggleMode}
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
-            >
-              {mode === 'login'
-                ? '¿No tienes cuenta? Regístrate'
-                : '¿Ya tienes cuenta? Inicia sesión'}
-            </button>
+            {mode === 'forgot' ? (
+              <button
+                type="button"
+                onClick={() => switchMode('login')}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+              >
+                Volver al inicio de sesión
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleMode}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+              >
+                {mode === 'login'
+                  ? '¿No tienes cuenta? Regístrate'
+                  : '¿Ya tienes cuenta? Inicia sesión'}
+              </button>
+            )}
           </div>
         </div>
       </div>
