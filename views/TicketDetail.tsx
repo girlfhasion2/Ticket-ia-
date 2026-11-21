@@ -1,12 +1,11 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
 import { Ticket, Person, TicketLine, Assignment, Category } from '../types';
 import { parseTicketImage } from '../geminiService';
-import { 
-  ArrowLeft, Camera, Images, Trash2, Plus, Users, 
+import {
+  ArrowLeft, Camera, Images, Trash2, Plus, Users,
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
-  Maximize2, Sparkles, MessageCircle
+  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
@@ -418,6 +417,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const totalRepartido = Object.values(userTotals).reduce((a, b) => a + b, 0);
   const isRepartoCompleto =
     pendingAssignments.length === 0 && Math.abs(totalRepartido - ticket.totalAmount) < 0.01;
+
+  const handleStatusChange = async (newStatus: 'borrador' | 'repartido' | 'pagado') => {
+    const updated = { ...ticket, status: newStatus };
+    await persistTicket(updated);
+  };
 
   const merchantDisplayName =
     ticket.merchant && ticket.merchant.trim() && ticket.merchant.trim().toLowerCase() !== 'null'
@@ -907,17 +911,76 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               </div>
             </div>
 
-            {hasAssignedItems && (
-              <a
-                href={whatsappUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-emerald-200 active-scale transition-colors"
-              >
-                <MessageCircle size={20} />
-                Compartir por WhatsApp
-              </a>
-            )}
+            {/* Botones de transición de estado */}
+            <div className="space-y-3">
+              {/* Confirmar reparto: reparto completo y aún en borrador */}
+              {isRepartoCompleto && (!ticket.status || ticket.status === 'borrador') && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange('repartido')}
+                  className="w-full py-4 px-6 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-orange-200 active-scale transition-colors"
+                >
+                  <CreditCard size={20} />
+                  Confirmar reparto
+                </button>
+              )}
+
+              {/* Marcar como pagado: cuando está en repartido */}
+              {ticket.status === 'repartido' && (
+                <>
+                  {hasAssignedItems && (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-emerald-200 active-scale transition-colors"
+                    >
+                      <MessageCircle size={20} />
+                      Compartir por WhatsApp
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleStatusChange('pagado')}
+                    className="w-full py-4 px-6 rounded-2xl bg-green-600 hover:bg-green-700 text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-green-200 active-scale transition-colors"
+                  >
+                    <CheckCircle2 size={20} />
+                    Marcar como pagado
+                  </button>
+                </>
+              )}
+
+              {/* Ticket pagado: banner verde + opción de reabrir */}
+              {ticket.status === 'pagado' && (
+                <div className="space-y-3">
+                  <div className="w-full py-4 px-6 rounded-2xl bg-green-50 border-2 border-green-200 flex items-center justify-center gap-3">
+                    <CheckCircle2 size={20} className="text-green-600" />
+                    <span className="font-black text-sm text-green-700 uppercase tracking-widest">Ticket pagado</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleStatusChange('borrador')}
+                    className="w-full py-3 px-6 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-600 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active-scale transition-colors"
+                  >
+                    <RotateCcw size={16} />
+                    Reabrir ticket
+                  </button>
+                </div>
+              )}
+
+              {/* WhatsApp: solo visible si no es borrador sin reparto confirmado */}
+              {(!ticket.status || ticket.status === 'borrador') && hasAssignedItems && (
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-4 px-6 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg shadow-emerald-200 active-scale transition-colors"
+                >
+                  <MessageCircle size={20} />
+                  Compartir por WhatsApp
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>
