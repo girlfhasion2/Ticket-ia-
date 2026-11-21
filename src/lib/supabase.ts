@@ -6,10 +6,40 @@ let supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || '';
 
 export let isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-export let supabase: SupabaseClient = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-anon-key'
-);
+let recoveryDetected =
+  typeof window !== 'undefined' &&
+  (window.location.hash.includes('type=recovery') ||
+    window.location.hash.includes('access_token'));
+
+export function wasRecoveryDetected(): boolean {
+  return recoveryDetected;
+}
+
+export function clearRecoveryDetected(): void {
+  recoveryDetected = false;
+}
+
+function attachRecoveryListener(client: SupabaseClient): void {
+  client.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      recoveryDetected = true;
+    }
+  });
+}
+
+export let supabase: SupabaseClient = isSupabaseConfigured
+  ? (() => {
+      const client = createClient(supabaseUrl, supabaseAnonKey);
+      attachRecoveryListener(client);
+      return client;
+    })()
+  : createClient('https://placeholder.supabase.co', 'placeholder-anon-key', {
+      auth: {
+        detectSessionInUrl: false,
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
 
 let configPromise: Promise<boolean> | null = null;
 
@@ -31,6 +61,7 @@ export async function ensureSupabaseConfigured(): Promise<boolean> {
           supabaseUrl = url;
           supabaseAnonKey = key;
           supabase = createClient(supabaseUrl, supabaseAnonKey);
+          attachRecoveryListener(supabase);
           isSupabaseConfigured = true;
           return true;
         }

@@ -4,6 +4,8 @@ import {
   supabase,
   isSupabaseConfigured,
   ensureSupabaseConfigured,
+  wasRecoveryDetected,
+  clearRecoveryDetected,
 } from '../lib/supabase';
 
 interface AuthResult {
@@ -15,6 +17,8 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   isConfigured: boolean;
+  isPasswordRecovery: boolean;
+  clearPasswordRecovery: () => void;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
@@ -26,6 +30,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isConfigured, setIsConfigured] = useState<boolean>(isSupabaseConfigured);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const hash = window.location.hash;
+    return (
+      wasRecoveryDetected() ||
+      hash.includes('type=recovery') ||
+      hash.includes('access_token')
+    );
+  });
+
+  const clearPasswordRecovery = () => {
+    clearRecoveryDetected();
+    setIsPasswordRecovery(false);
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -42,12 +60,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      if (wasRecoveryDetected()) {
+        setIsPasswordRecovery(true);
+      }
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((event, session) => {
+        if (!isMounted) return;
+        if (event === 'PASSWORD_RECOVERY') {
+          setIsPasswordRecovery(true);
+        }
+        setUser(session?.user ?? null);
+        setLoading(false);
+      });
+
+      unsubscribe = () => subscription.unsubscribe();
+
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
         if (isMounted) {
           setUser(session?.user ?? null);
+          if (wasRecoveryDetected()) {
+            setIsPasswordRecovery(true);
+          }
         }
       } catch {
         if (isMounted) {
@@ -58,17 +96,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
         }
       }
-
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange((_event, session) => {
-        if (isMounted) {
-          setUser(session?.user ?? null);
-          setLoading(false);
-        }
-      });
-
-      unsubscribe = () => subscription.unsubscribe();
     };
 
     init();
@@ -127,7 +154,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, isConfigured, signIn, signUp, signOut }}
+      value={{
+        user,
+        loading,
+        isConfigured,
+        isPasswordRecovery,
+        clearPasswordRecovery,
+        signIn,
+        signUp,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>
