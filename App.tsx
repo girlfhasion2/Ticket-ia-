@@ -28,6 +28,7 @@ const App: React.FC = () => {
   );
   const [view, setView] = useState<AppState['view']>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
+  const [draftTicket, setDraftTicket] = useState<Ticket | undefined>();
   const [isListSelectionMode, setIsListSelectionMode] = useState(false);
 
   useEffect(() => {
@@ -76,34 +77,34 @@ const App: React.FC = () => {
     if (!user) {
       setView('list');
       setSelectedTicketId(undefined);
+      setDraftTicket(undefined);
       setIsListSelectionMode(false);
     }
   }, [user]);
 
   const navigateToTicket = (id: string) => {
     setIsListSelectionMode(false);
+    setDraftTicket(undefined);
     setSelectedTicketId(id);
     setView('detail');
   };
 
-  const createNewTicket = async () => {
+  const createNewTicket = () => {
     const id = crypto.randomUUID();
     const newTicket: Ticket = {
       id,
       merchant: "Nuevo Comercio",
       date: new Date().toISOString().split('T')[0],
       totalAmount: 0,
-      participants: [], 
+      participants: [],
       lines: [],
-      discardedLines: [], // Inicialización necesaria
+      discardedLines: [],
       createdAt: Date.now()
     };
-    try {
-      await db.tickets.add(newTicket);
-      navigateToTicket(id);
-    } catch (error) {
-      console.error('Error creating ticket:', error);
-    }
+    setIsListSelectionMode(false);
+    setDraftTicket(newTicket);
+    setSelectedTicketId(id);
+    setView('detail');
   };
 
   if (isPasswordRecovery || authPasswordRecovery) {
@@ -151,9 +152,14 @@ const App: React.FC = () => {
         );
       case 'detail':
         return selectedTicketId ? (
-          <TicketDetail 
-            ticketId={selectedTicketId} 
-            onBack={() => setView('list')} 
+          <TicketDetail
+            ticketId={selectedTicketId}
+            initialTicket={draftTicket?.id === selectedTicketId ? draftTicket : undefined}
+            onBack={() => {
+              setDraftTicket(undefined);
+              setSelectedTicketId(undefined);
+              setView('list');
+            }}
           />
         ) : null;
       case 'settings':

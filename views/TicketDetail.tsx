@@ -13,11 +13,16 @@ import { prepareReceiptImage } from '../utils/imageUtils';
 
 interface TicketDetailProps {
   ticketId: string;
+  initialTicket?: Ticket;
   onBack: () => void;
 }
 
-const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
-  const [ticket, setTicket] = useState<Ticket | null>(null);
+const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, onBack }) => {
+  const [ticket, setTicket] = useState<Ticket | null>(
+    initialTicket
+      ? { ...initialTicket, discardedLines: initialTicket.discardedLines || [] }
+      : null
+  );
   const [activeTab, setActiveTab] = useState<'info' | 'items' | 'split' | 'summary'>('info');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
@@ -30,8 +35,20 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
   const [isDragging, setIsDragging] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
+  const isPersistedRef = useRef<boolean>(!initialTicket);
+  const pendingSaveRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
+    if (initialTicket && initialTicket.id === ticketId) {
+      isPersistedRef.current = false;
+      setTicket({
+        ...initialTicket,
+        discardedLines: initialTicket.discardedLines || [],
+      });
+      return;
+    }
+
+    isPersistedRef.current = true;
     const loadData = async () => {
       const t = await db.tickets.get(ticketId);
       if (t) {
@@ -42,15 +59,35 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
       }
     };
     loadData();
-  }, [ticketId]);
+  }, [ticketId, initialTicket]);
 
   if (!ticket) return <div className="p-8 text-center font-medium text-gray-500 italic">Cargando ticket...</div>;
+
+  const persistTicket = (ticketToSave: Ticket): Promise<void> => {
+    setTicket(ticketToSave);
+    isPersistedRef.current = true;
+    const nextSave = pendingSaveRef.current
+      .catch(() => {})
+      .then(async () => {
+        await db.tickets.put(ticketToSave);
+      });
+    pendingSaveRef.current = nextSave;
+    return nextSave;
+  };
 
   const saveTicketAndSyncTotal = async (updated: Ticket) => {
     const newSum = Number(updated.lines.reduce((sum, l) => sum + l.total, 0).toFixed(2));
     const ticketWithCorrectTotal = { ...updated, totalAmount: newSum };
-    await db.tickets.put(ticketWithCorrectTotal);
-    setTicket(ticketWithCorrectTotal);
+    await persistTicket(ticketWithCorrectTotal);
+  };
+
+  const handleBack = async () => {
+    try {
+      await pendingSaveRef.current;
+    } catch {
+      // Ignore save errors on navigation back
+    }
+    onBack();
   };
 
   const runOcrOnImage = async (targetTicket: Ticket, base64Image: string) => {
@@ -112,8 +149,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
     try {
       const normalizedBase64 = await prepareReceiptImage(source);
       const updatedTicket: Ticket = { ...ticket, imageBase64: normalizedBase64 };
-      await db.tickets.put(updatedTicket);
-      setTicket(updatedTicket);
+      await persistTicket(updatedTicket);
       await runOcrOnImage(updatedTicket, normalizedBase64);
     } catch (error: any) {
       console.error("Image processing error", error);
@@ -140,8 +176,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
 
   const removeTicketImage = async () => {
     const updatedTicket: Ticket = { ...ticket, imageBase64: undefined };
-    await db.tickets.put(updatedTicket);
-    setTicket(updatedTicket);
+    await persistTicket(updatedTicket);
     setOcrError(null);
   };
 
@@ -235,7 +270,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      await db.tickets.delete(ticket.id);
+      await pendingSaveRef.current.catch(() => {});
+      if (isPersistedRef.current) {
+        await db.tickets.delete(ticket.id);
+      }
       setShowDeleteConfirm(false);
       onBack();
     } catch (err: any) {
@@ -279,11 +317,41 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
     saveTicketAndSyncTotal({ ...ticket, lines });
   };
 
+  const gcd = (a: number, b: number): number => {
+    let x = Math.abs(Math.round(a));
+    let y = Math.abs(Math.round(b));
+    while (y !== 0) {
+      const t = y;
+      y = x % y;
+      x = t;
+    }
+    return x || 1;
+  };
+
+  const formatShareQuantity = (num: number, den: number): string => {
+    const g = gcd(num, den);
+    const n = num / g;
+    const d = den / g;
+    const whole = Math.floor(n / d);
+    const rem = n % d;
+
+    if (rem === 0) {
+      return whole <= 1 ? '' : ` (×${whole})`;
+    }
+    if (whole === 0) {
+      return ` (×${rem}/${d})`;
+    }
+    return ` (×${whole}+${rem}/${d})`;
+  };
+
   const userTotals: { [key: string]: number } = {};
-  const personAssignedItems: Record<string, { description: string; amount: number }[]> = {};
+  const personAssignedItems: Record<
+    string,
+    Map<string, { description: string; num: number; den: number; amount: number }>
+  > = {};
   ticket.participants.forEach((p) => {
     userTotals[p.id] = 0;
-    personAssignedItems[p.id] = [];
+    personAssignedItems[p.id] = new Map();
   });
   const pendingAssignments: { description: string; units: number }[] = [];
 
@@ -300,15 +368,33 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
       if (asgn.personIds.length === 0 || asgn.units <= 0) return;
       const groupTotal = asgn.units * line.unitPrice;
       const perPerson = groupTotal / asgn.personIds.length;
-      const itemLabel =
-        asgn.units > 1 ? `${line.description} (×${asgn.units})` : line.description;
+      const addNum = Number.isInteger(asgn.units)
+        ? asgn.units
+        : Math.round(asgn.units * 100);
+      const addDen = Number.isInteger(asgn.units)
+        ? asgn.personIds.length
+        : 100 * asgn.personIds.length;
+
       asgn.personIds.forEach((pId) => {
         userTotals[pId] = (userTotals[pId] || 0) + perPerson;
-        if (!personAssignedItems[pId]) personAssignedItems[pId] = [];
-        personAssignedItems[pId].push({
-          description: itemLabel,
-          amount: perPerson,
-        });
+        if (!personAssignedItems[pId]) personAssignedItems[pId] = new Map();
+        const existing = personAssignedItems[pId].get(line.id);
+        if (existing) {
+          const rawNum = existing.num * addDen + addNum * existing.den;
+          const rawDen = existing.den * addDen;
+          const g = gcd(rawNum, rawDen);
+          existing.num = rawNum / g;
+          existing.den = rawDen / g;
+          existing.amount += perPerson;
+        } else {
+          const g = gcd(addNum, addDen);
+          personAssignedItems[pId].set(line.id, {
+            description: line.description,
+            num: addNum / g,
+            den: addDen / g,
+            amount: perPerson,
+          });
+        }
       });
     });
   });
@@ -326,37 +412,34 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
     ticket.merchant && ticket.merchant.toLowerCase() !== 'null' ? ticket.merchant : '';
 
   const participantsWithItems = ticket.participants.filter(
-    (p) => (personAssignedItems[p.id]?.length || 0) > 0
+    (p) => (personAssignedItems[p.id]?.size || 0) > 0
   );
   const hasAssignedItems = participantsWithItems.length > 0;
 
   const whatsappUrl = (() => {
     if (!hasAssignedItems) return '';
     const sections: string[] = [
-      `🧾 *${merchantDisplayName}*`,
-      `📅 ${ticket.date}`,
+      `*${merchantDisplayName}*`,
+      `${ticket.date} · Total: ${ticket.totalAmount.toFixed(2)}€`,
     ];
 
     participantsWithItems.forEach((p) => {
-      const items = personAssignedItems[p.id] || [];
+      const items = Array.from(personAssignedItems[p.id]?.values() || []);
       const personLines = items.map(
-        (item) => `  • ${item.description} — ${item.amount.toFixed(2)}€`
+        (item) =>
+          `  • ${item.description}${formatShareQuantity(item.num, item.den)} — ${item.amount.toFixed(2)}€`
       );
       const total = (userTotals[p.id] || 0).toFixed(2);
-      sections.push(
-        '',
-        [`👤 *${p.name}*`, ...personLines, `  *Total: ${total}€*`].join('\n')
-      );
+      sections.push('', [`*${p.name} — ${total}€*`, ...personLines].join('\n'));
     });
 
-    sections.push('', `💰 *Total ticket: ${ticket.totalAmount.toFixed(2)}€*`);
     return `https://wa.me/?text=${encodeURIComponent(sections.join('\n'))}`;
   })();
 
   return (
     <div className="flex flex-col h-full bg-white">
       <header className="p-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-20">
-        <button type="button" onClick={onBack} className="p-3 -ml-2 text-gray-500 hover:text-indigo-600 active-scale">
+        <button type="button" onClick={handleBack} className="p-3 -ml-2 text-gray-500 hover:text-indigo-600 active-scale">
           <ArrowLeft size={24} />
         </button>
         <div className="flex-1 px-2 text-center overflow-hidden">
