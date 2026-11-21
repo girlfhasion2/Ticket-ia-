@@ -1003,8 +1003,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
       {pendingLineModal && (() => {
         const line = ticket.lines.find(l => l.id === pendingLineModal);
         if (!line) return null;
+        const unitsAssignedToPeople = line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units : s, 0);
         const unitsAssigned = line.assignments.reduce((s, a) => s + a.units, 0);
-        const pendingUnits = Math.max(0, line.quantity - unitsAssigned);
+        const pendingUnits = Math.max(0, line.quantity - unitsAssignedToPeople);
         const isFullyAssigned = pendingUnits <= 0;
         return (
           <div
@@ -1091,6 +1092,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                         + NUEVO GRUPO DE REPARTO
                       </button>
                     )}
+
                   </>
                 )}
               </div>
