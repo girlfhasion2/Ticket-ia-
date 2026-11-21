@@ -7,6 +7,15 @@
     <meta name="description" content="Gestión inteligente de gastos y reparto de tickets offline-first con soporte OCR.">
     <meta property="og:title" content="TicketSplit AI">
     <meta property="og:description" content="Gestión inteligente de gastos y reparto de tickets offline-first con soporte OCR.">
+    <script>
+        (function () {
+            try {
+                var m = localStorage.getItem('ticketia_theme') || 'system';
+                var dark = m === 'dark' || (m === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (dark) document.documentElement.classList.add('dark');
+            } catch (e) {}
+        })();
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -17,6 +26,74 @@
             -webkit-tap-highlight-color: transparent;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
+
+        /* ===== Modo oscuro: reasigna los colores de Tailwind usados en la app ===== */
+        html.dark { color-scheme: dark; }
+        html.dark body { background-color: #0b0f19; }
+        html.dark .bg-white { background-color: #161b26; }
+        html.dark .bg-gray-50 { background-color: #1d2330; }
+        html.dark .bg-gray-100 { background-color: #232a39; }
+        html.dark .bg-gray-200 { background-color: #2d3546; }
+        html.dark .bg-white\/80, html.dark .bg-white\/60 { background-color: rgba(22,27,38,.85); }
+        html.dark .bg-gray-50\/30, html.dark .bg-gray-50\/40, html.dark .bg-gray-50\/50, html.dark .bg-gray-100\/50 { background-color: rgba(255,255,255,.03); }
+        html.dark .border-white { border-color: #161b26; }
+        html.dark .border-gray-50 { border-color: #1e2433; }
+        html.dark .border-gray-100, html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #262e3d; }
+        html.dark .border-gray-200 { border-color: #313a4c; }
+        html.dark .border-gray-300 { border-color: #3d475b; }
+        html.dark .text-gray-900 { color: #f3f4f6; }
+        html.dark .text-gray-800 { color: #e5e7eb; }
+        html.dark .text-gray-700 { color: #d1d5db; }
+        html.dark .text-gray-600 { color: #b4bcc9; }
+        html.dark .text-gray-500 { color: #9ca3af; }
+        html.dark .text-gray-400 { color: #8b94a5; }
+        html.dark .text-gray-300 { color: #5b6578; }
+        html.dark .text-gray-200 { color: #3d475b; }
+        /* Indigo */
+        html.dark .bg-indigo-50, html.dark .bg-indigo-50\/70, html.dark .bg-indigo-50\/30 { background-color: rgba(99,102,241,.15); }
+        html.dark .bg-indigo-100 { background-color: rgba(99,102,241,.25); }
+        html.dark .from-indigo-50 { --tw-gradient-from: rgba(99,102,241,.15); --tw-gradient-to: rgba(99,102,241,0); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+        html.dark .to-indigo-100 { --tw-gradient-to: rgba(99,102,241,.25); }
+        html.dark .text-indigo-400, html.dark .text-indigo-500, html.dark .text-indigo-600, html.dark .text-indigo-600\/80 { color: #818cf8; }
+        html.dark .text-indigo-700 { color: #a5b4fc; }
+        html.dark .text-indigo-800, html.dark .text-indigo-900, html.dark .text-indigo-950 { color: #c7d2fe; }
+        html.dark .border-indigo-100, html.dark .border-indigo-200, html.dark .border-indigo-300 { border-color: rgba(129,140,248,.35); }
+        html.dark .ring-indigo-100 { --tw-ring-color: rgba(129,140,248,.3); }
+        html.dark .ring-gray-50, html.dark .ring-gray-100 { --tw-ring-color: #262e3d; }
+        /* Rojo */
+        html.dark .bg-red-50 { background-color: rgba(239,68,68,.12); }
+        html.dark .bg-red-100 { background-color: rgba(239,68,68,.2); }
+        html.dark .text-red-300, html.dark .text-red-400, html.dark .text-red-500, html.dark .text-red-500\/70, html.dark .text-red-600, html.dark .text-red-700 { color: #f87171; }
+        html.dark .border-red-200 { border-color: rgba(239,68,68,.35); }
+        /* Verde */
+        html.dark .bg-green-50 { background-color: rgba(34,197,94,.12); }
+        html.dark .bg-green-100 { background-color: rgba(34,197,94,.2); }
+        html.dark .text-green-600 { color: #4ade80; }
+        html.dark .text-green-700, html.dark .text-green-800 { color: #86efac; }
+        html.dark .border-green-100, html.dark .border-green-200 { border-color: rgba(34,197,94,.3); }
+        /* Ambar y naranja */
+        html.dark .bg-amber-50, html.dark .bg-amber-50\/50, html.dark .bg-orange-50 { background-color: rgba(245,158,11,.12); }
+        html.dark .bg-amber-100, html.dark .bg-orange-100 { background-color: rgba(245,158,11,.2); }
+        html.dark .text-amber-600, html.dark .text-amber-700, html.dark .text-orange-600 { color: #fbbf24; }
+        html.dark .text-amber-800, html.dark .text-amber-900 { color: #fcd34d; }
+        html.dark .border-amber-100, html.dark .border-amber-200 { border-color: rgba(245,158,11,.3); }
+        /* Sombras de color: mas discretas */
+        html.dark .shadow-indigo-200, html.dark .shadow-red-200, html.dark .shadow-emerald-200, html.dark .shadow-orange-200, html.dark .shadow-green-200 { --tw-shadow-color: rgba(0,0,0,.45); }
+        /* Estados hover / focus / active (mayor especificidad que las clases base) */
+        html.dark .hover\:bg-gray-50:hover, html.dark .active\:bg-gray-50:active { background-color: #232a39; }
+        html.dark .hover\:bg-gray-100:hover { background-color: #2d3546; }
+        html.dark .hover\:bg-gray-200:hover { background-color: #384156; }
+        html.dark .focus\:bg-white:focus { background-color: #161b26; }
+        html.dark .hover\:bg-indigo-50:hover { background-color: rgba(99,102,241,.2); }
+        html.dark .hover\:bg-indigo-100:hover { background-color: rgba(99,102,241,.3); }
+        html.dark .hover\:bg-red-50:hover { background-color: rgba(239,68,68,.18); }
+        html.dark .hover\:bg-red-100:hover { background-color: rgba(239,68,68,.28); }
+        html.dark .hover\:bg-orange-50:hover, html.dark .hover\:bg-green-50:hover { background-color: rgba(245,158,11,.18); }
+        html.dark .hover\:border-indigo-200:hover, html.dark .hover\:border-indigo-300:hover, html.dark .focus\:border-indigo-100:focus, html.dark .focus\:border-indigo-200:focus { border-color: rgba(129,140,248,.5); }
+        html.dark .hover\:text-gray-700:hover { color: #d1d5db; }
+        html.dark .hover\:text-indigo-600:hover, html.dark .hover\:text-indigo-500:hover, html.dark .hover\:text-indigo-800:hover, html.dark .group:hover .group-hover\:text-indigo-600 { color: #a5b4fc; }
+        html.dark .group:hover .group-hover\:text-gray-600 { color: #d1d5db; }
+        html.dark .hover\:text-red-500:hover, html.dark .hover\:text-red-600:hover, html.dark .hover\:text-red-700:hover, html.dark .group:hover .group-hover\:text-red-600, html.dark .group:hover .group-hover\:text-red-700 { color: #fca5a5; }
         /* Mobile-friendly active states */
         .active-scale:active {
             transform: scale(0.98);

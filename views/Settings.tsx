@@ -4,16 +4,24 @@ import { db } from '../db';
 import { Ticket } from '../types';
 import { 
   Download, Upload, Trash2, ShieldCheck, 
-  FileSpreadsheet, Check, X, Calendar, Store, LogOut, Mail
+  FileSpreadsheet, Check, X, Calendar, Store, LogOut, Mail,
+  Sun, Moon, Monitor, Palette
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../src/contexts/AuthContext';
+import { ThemeMode, getStoredTheme, setTheme } from '../utils/theme';
 
 const Settings: React.FC = () => {
   const { user, signOut } = useAuth();
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
+
+  const changeTheme = (mode: ThemeMode) => {
+    setThemeMode(mode);
+    setTheme(mode);
+  };
 
   useEffect(() => {
     if (showExportPicker) {
@@ -162,6 +170,43 @@ const Settings: React.FC = () => {
               </div>
               <LogOut size={22} className="text-gray-400 group-hover:text-red-600" />
             </button>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-50">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
+              <Palette size={18} className="text-indigo-600" />
+              Apariencia
+            </h3>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Apariencia de la aplicación">
+              {([
+                { mode: 'light', label: 'Claro', Icon: Sun },
+                { mode: 'dark', label: 'Oscuro', Icon: Moon },
+                { mode: 'system', label: 'Sistema', Icon: Monitor },
+              ] as const).map(({ mode, label, Icon }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={themeMode === mode}
+                  onClick={() => changeTheme(mode)}
+                  className={`flex flex-col items-center gap-2 py-4 rounded-2xl border-2 font-black text-[11px] uppercase tracking-widest transition-colors active-scale ${
+                    themeMode === mode
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-600'
+                      : 'border-gray-100 bg-gray-50 text-gray-500'
+                  }`}
+                >
+                  <Icon size={22} />
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">
+              {themeMode === 'system' ? 'Sigue la configuración de tu dispositivo' : themeMode === 'dark' ? 'Siempre en modo oscuro' : 'Siempre en modo claro'}
+            </p>
           </div>
         </section>
 
