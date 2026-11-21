@@ -24,6 +24,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   );
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeTab, setActiveTab] = useState<'info' | 'items' | 'split' | 'summary'>('info');
+  const [splitFilter, setSplitFilter] = useState<'all' | 'pending'>('all');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [newParticipantName, setNewParticipantName] = useState("");
@@ -812,64 +813,127 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         )}
 
         {activeTab === 'split' && (
-          <div className="space-y-6 pb-20 animate-in fade-in duration-300">
+          <div className="pb-20 animate-in fade-in duration-300">
              {ticket.participants.length === 0 ? (
                <div className="text-center py-20 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200 m-4">
                  <UserPlus size={48} className="mx-auto text-gray-300 mb-4" />
                  <p className="text-gray-500 font-bold px-8">Añade participantes en General para repartir.</p>
                  <button onClick={() => setActiveTab('info')} className="bg-indigo-600 text-white font-black text-[10px] px-8 py-4 rounded-full mt-6 active-scale uppercase tracking-widest shadow-lg">Añadir Personas</button>
                </div>
-             ) : (
-               ticket.lines.map(line => {
-                 const unitsAssignedToPeople = line.assignments.reduce((sum, a) => a.personIds.length > 0 ? sum + a.units : sum, 0);
-                 const pendingUnits = Math.max(0, line.quantity - unitsAssignedToPeople);
-                 const isFullyAssigned = pendingUnits <= 0;
-                 return (
-                   <div key={line.id} className="bg-white border border-gray-100 rounded-3xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-2">
-                     <div className={`p-4 flex justify-between items-center text-white transition-colors duration-500 ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
-                       <div className="max-w-[70%]">
-                         <h4 className="font-black text-xs uppercase truncate">{line.description}</h4>
-                         <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
-                       </div>
-                       <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
-                         {isFullyAssigned ? 'OK' : `${pendingUnits} PEND.`}
-                       </div>
+             ) : (() => {
+               const totalRepartidoSplit = ticket.lines.reduce((sum, line) =>
+                 sum + line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units * line.unitPrice : s, 0), 0);
+               const pct = ticket.totalAmount > 0 ? Math.round((totalRepartidoSplit / ticket.totalAmount) * 100) : 0;
+               const pendingCount = ticket.lines.filter(line => {
+                 const assigned = line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units : s, 0);
+                 return line.quantity - assigned > 0.001;
+               }).length;
+               const visibleLines = splitFilter === 'pending'
+                 ? ticket.lines.filter(line => {
+                     const assigned = line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units : s, 0);
+                     return line.quantity - assigned > 0.001;
+                   })
+                 : ticket.lines;
+               return (
+                 <>
+                   {/* Barra de progreso */}
+                   <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 pt-3 pb-3 shadow-sm">
+                     <div className="flex justify-between items-center mb-1.5">
+                       <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Repartido</span>
+                       <span className="text-xs font-black text-gray-700 tabular-nums">
+                         {totalRepartidoSplit.toFixed(2)}€ <span className="text-gray-400 font-normal">/ {ticket.totalAmount.toFixed(2)}€</span>
+                       </span>
+                       <span className="text-xs font-black text-indigo-600">{pct}%</span>
                      </div>
-                     <div className="p-4 space-y-4 bg-gray-50/30">
-                       {line.assignments.map(asgn => (
-                         <div key={asgn.id} className={`p-4 border rounded-2xl animate-in slide-in-from-left-2 duration-200 shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
-                           <div className="flex items-center justify-between mb-4">
-                             <div className="flex flex-col">
-                               <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
-                               <input type="number" value={asgn.units} onChange={(e) => updateAssignment(line.id, asgn.id, { units: parseInt(e.target.value) || 0 })} className="w-12 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none" />
-                             </div>
-                             <button onClick={() => deleteAssignment(line.id, asgn.id)} className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl">
-                               <Trash2 size={18} />
-                             </button>
-                           </div>
-                           <div className="flex flex-wrap gap-2">
-                             {ticket.participants.map(p => {
-                               const isSelected = asgn.personIds.includes(p.id);
-                               return (
-                                 <button key={p.id} onClick={() => {
-                                   const newPids = isSelected ? asgn.personIds.filter(id => id !== p.id) : [...asgn.personIds, p.id];
-                                   updateAssignment(line.id, asgn.id, { personIds: newPids });
-                                 }} className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} active-scale`}>
-                                   {p.name}
-                                 </button>
-                               );
-                             })}
-                           </div>
-                         </div>
-                       ))}
-                       {line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity && (
-                         <button onClick={() => addAssignment(line.id)} className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale">+ NUEVO GRUPO DE REPARTO</button>
-                       )}
+                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                       <div
+                         className={`h-full rounded-full transition-all duration-500 ${pct >= 100 ? 'bg-green-500' : 'bg-indigo-500'}`}
+                         style={{ width: `${Math.min(pct, 100)}%` }}
+                       />
                      </div>
                    </div>
-                 );
-               })
-             )}
+
+                   {/* Chips de filtro */}
+                   <div className="flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
+                     <button
+                       onClick={() => setSplitFilter('all')}
+                       className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'all' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
+                     >
+                       Todos
+                     </button>
+                     <button
+                       onClick={() => setSplitFilter('pending')}
+                       className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'pending' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
+                     >
+                       Pendientes {pendingCount > 0 && `(${pendingCount})`}
+                     </button>
+                   </div>
+
+                   {/* Lista de productos */}
+                   <div className="space-y-6 p-4">
+                     {visibleLines.length === 0 && (
+                       <div className="text-center py-16 text-gray-400 font-bold text-sm">Todo repartido</div>
+                     )}
+                     {visibleLines.map(line => {
+                       const unitsAssignedToPeople = line.assignments.reduce((sum, a) => a.personIds.length > 0 ? sum + a.units : sum, 0);
+                       const pendingUnits = Math.max(0, line.quantity - unitsAssignedToPeople);
+                       const isFullyAssigned = pendingUnits <= 0;
+                       return (
+                         <div key={line.id} className={`border rounded-3xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-2 transition-all ${isFullyAssigned ? 'bg-green-50 border-green-100 opacity-75' : 'bg-white border-gray-100'}`}>
+                           <div className={`p-4 flex justify-between items-center text-white transition-colors duration-500 ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
+                             <div className="flex items-center gap-2 max-w-[70%]">
+                               {isFullyAssigned && (
+                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                   <polyline points="20,6 9,17 4,12"/>
+                                 </svg>
+                               )}
+                               <div>
+                                 <h4 className={`font-black text-xs uppercase truncate ${isFullyAssigned ? 'opacity-80' : ''}`}>{line.description}</h4>
+                                 <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
+                               </div>
+                             </div>
+                             <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
+                               {isFullyAssigned ? 'OK' : `${pendingUnits} PEND.`}
+                             </div>
+                           </div>
+                           <div className="p-4 space-y-4 bg-gray-50/30">
+                             {line.assignments.map(asgn => (
+                               <div key={asgn.id} className={`p-4 border rounded-2xl animate-in slide-in-from-left-2 duration-200 shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
+                                 <div className="flex items-center justify-between mb-4">
+                                   <div className="flex flex-col">
+                                     <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
+                                     <input type="number" value={asgn.units} onChange={(e) => updateAssignment(line.id, asgn.id, { units: parseInt(e.target.value) || 0 })} className="w-12 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none" />
+                                   </div>
+                                   <button onClick={() => deleteAssignment(line.id, asgn.id)} className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl">
+                                     <Trash2 size={18} />
+                                   </button>
+                                 </div>
+                                 <div className="flex flex-wrap gap-2">
+                                   {ticket.participants.map(p => {
+                                     const isSelected = asgn.personIds.includes(p.id);
+                                     return (
+                                       <button key={p.id} onClick={() => {
+                                         const newPids = isSelected ? asgn.personIds.filter(id => id !== p.id) : [...asgn.personIds, p.id];
+                                         updateAssignment(line.id, asgn.id, { personIds: newPids });
+                                       }} className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} active-scale`}>
+                                         {p.name}
+                                       </button>
+                                     );
+                                   })}
+                                 </div>
+                               </div>
+                             ))}
+                             {line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity && (
+                               <button onClick={() => addAssignment(line.id)} className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale">+ NUEVO GRUPO DE REPARTO</button>
+                             )}
+                           </div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 </>
+               );
+             })()}
           </div>
         )}
 
