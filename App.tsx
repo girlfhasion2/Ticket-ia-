@@ -1,15 +1,25 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from './db';
 import { Ticket, AppState } from './types';
 import TicketList from './views/TicketList';
 import TicketDetail from './views/TicketDetail';
 import Settings from './views/Settings';
-import { Home, Settings as SettingsIcon, PlusCircle } from 'lucide-react';
+import Auth from './views/Auth';
+import { useAuth } from './src/contexts/AuthContext';
+import { Home, Settings as SettingsIcon, PlusCircle, RefreshCw } from 'lucide-react';
 
 const App: React.FC = () => {
+  const { user, loading } = useAuth();
   const [view, setView] = useState<AppState['view']>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!user) {
+      setView('list');
+      setSelectedTicketId(undefined);
+    }
+  }, [user]);
 
   const navigateToTicket = (id: string) => {
     setSelectedTicketId(id);
@@ -28,9 +38,32 @@ const App: React.FC = () => {
       discardedLines: [], // Inicialización necesaria
       createdAt: Date.now()
     };
-    await db.tickets.add(newTicket);
-    navigateToTicket(id);
+    try {
+      await db.tickets.add(newTicket);
+      navigateToTicket(id);
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen max-w-2xl mx-auto bg-white shadow-xl">
+        <RefreshCw size={32} className="animate-spin text-indigo-600 mb-3" />
+        <p className="text-xs font-black uppercase tracking-widest text-gray-400">
+          Cargando sesión...
+        </p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col h-screen max-w-2xl mx-auto bg-gray-50 shadow-xl overflow-y-auto">
+        <Auth />
+      </div>
+    );
+  }
 
   const renderView = () => {
     switch (view) {

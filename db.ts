@@ -1,30 +1,182 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { supabaseReady } from './src/lib/supabase';
+import { Ticket } from './types';
 
-import { Dexie } from 'dexie';
-import type { Table } from 'dexie';
-import { Ticket, Person } from './types';
+interface TicketRow {
+  id: string;
+  user_id: string;
+  data: Ticket;
+  created_at?: string;
+}
 
-/**
- * Using the named import for Dexie to ensure that the class and its inherited members
- * like 'version' are correctly typed and recognized by TypeScript when extending the class.
- * This resolves potential typing ambiguities that can occur with default imports in certain environments.
- */
-// Fix: Use the named export { Dexie } to ensure proper class inheritance and method availability in TypeScript.
-export class TicketSplitDB extends Dexie {
-  tickets!: Table<Ticket>;
-  people!: Table<Person>;
+function formatDbError(
+  action: string,
+  error: { code?: string; message?: string; hint?: string }
+): Error {
+  const code = error.code || '';
+  const msg = error.message || 'Error desconocido de Supabase.';
 
-  constructor() {
-    super('TicketSplitDB');
-    /**
-     * Defining the database schema. The 'version' method is inherited from the Dexie base class.
-     * This defines the versioning and the indexed fields for each table.
-     */
-    // Fix: Accessing 'version' method which is inherited from the base Dexie class.
-    this.version(1).stores({
-      tickets: 'id, date, merchant, createdAt',
-      people: 'id, name'
+  if (code === '42501' || msg.toLowerCase().includes('permission denied')) {
+    return new Error(
+      `Permisos insuficientes en Supabase (${action}). Ejecuta en el SQL Editor de Supabase: GRANT USAGE ON SCHEMA public TO authenticated; GRANT ALL ON TABLE public.tickets TO authenticated;`
+    );
+  }
+
+  if (code === '42P01' || code === 'PGRST205') {
+    return new Error(
+      `La tabla "tickets" no existe en Supabase (${action}). Crea la tabla con el esquema SQL proporcionado.`
+    );
+  }
+
+  return new Error(`Error al ${action}: ${msg}`);
+}
+
+async function getReadyClientAndUserId(): Promise<{
+  client: SupabaseClient;
+  userId: string;
+}> {
+  const client = await supabaseReady;
+  const {
+    data: { user },
+    error,
+  } = await client.auth.getUser();
+
+  if (error || !user) {
+    throw new Error('Debes iniciar sesión para acceder a tus tickets.');
+  }
+
+  return { client, userId: user.id };
+}
+
+function sortTicketsByField(
+  tickets: Ticket[],
+  field: keyof Ticket,
+  descending: boolean
+): Ticket[] {
+  return [...tickets].sort((a, b) => {
+    const valA = a[field];
+    const valB = b[field];
+
+    let cmp = 0;
+    if (typeof valA === 'number' && typeof valB === 'number') {
+      cmp = valA - valB;
+    } else {
+      cmp = String(valA ?? '').localeCompare(String(valB ?? ''));
+    }
+
+    return descending ? -cmp : cmp;
+  });
+}
+
+async function fetchUserTickets(): Promise<Ticket[]> {
+  const { client, userId } = await getReadyClientAndUserId();
+  const { data, error } = await client
+    .from('tickets')
+    .select('data')
+    .eq('user_id', userId);
+
+  if (error) {
+    throw formatDbError('obtener los tickets', error);
+  }
+
+  return ((data as Pick<TicketRow, 'data'>[] | null) || []).map((row) => row.data);
+}
+
+class SupabaseTicketsStore {
+  async get(id: string): Promise<Ticket | undefined> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { data, error } = await client
+      .from('tickets')
+      .select('data')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle<Pick<TicketRow, 'data'>>();
+
+    if (error) {
+      throw formatDbError('cargar el ticket', error);
+    }
+
+    return data?.data;
+  }
+
+  async add(ticket: Ticket): Promise<string> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client.from('tickets').insert({
+      id: ticket.id,
+      user_id: userId,
+      data: ticket,
     });
+
+    if (error) {
+      throw formatDbError('crear el ticket', error);
+    }
+
+    return ticket.id;
+  }
+
+  async put(ticket: Ticket): Promise<string> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client.from('tickets').upsert(
+      {
+        id: ticket.id,
+        user_id: userId,
+        data: ticket,
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      throw formatDbError('guardar el ticket', error);
+    }
+
+    return ticket.id;
+  }
+
+  async delete(id: string): Promise<void> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client
+      .from('tickets')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw formatDbError('eliminar el ticket', error);
+    }
+  }
+
+  async clear(): Promise<void> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client
+      .from('tickets')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) {
+      throw formatDbError('borrar los tickets', error);
+    }
+  }
+
+  async toArray(): Promise<Ticket[]> {
+    return fetchUserTickets();
+  }
+
+  orderBy(field: keyof Ticket) {
+    return {
+      toArray: async (): Promise<Ticket[]> => {
+        const items = await fetchUserTickets();
+        return sortTicketsByField(items, field, false);
+      },
+      reverse: () => ({
+        toArray: async (): Promise<Ticket[]> => {
+          const items = await fetchUserTickets();
+          return sortTicketsByField(items, field, true);
+        },
+      }),
+    };
   }
 }
 
-export const db = new TicketSplitDB();
+export const db = {
+  tickets: new SupabaseTicketsStore(),
+};

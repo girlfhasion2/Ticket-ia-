@@ -1,8 +1,22 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../db';
 import { Person } from '../types';
 import { UserPlus, Trash2, Edit2, Check, X, Search } from 'lucide-react';
+
+const PEOPLE_STORAGE_KEY = 'ticketsplit_people';
+
+const readPeopleFromStorage = (): Person[] => {
+  try {
+    const raw = localStorage.getItem(PEOPLE_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Person[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writePeopleToStorage = (items: Person[]) => {
+  localStorage.setItem(PEOPLE_STORAGE_KEY, JSON.stringify(items));
+};
 
 const PeopleManager: React.FC = () => {
   const [people, setPeople] = useState<Person[]>([]);
@@ -16,8 +30,7 @@ const PeopleManager: React.FC = () => {
   }, []);
 
   const loadPeople = async () => {
-    const all = await db.people.toArray();
-    setPeople(all);
+    setPeople(readPeopleFromStorage());
   };
 
   const addPerson = async () => {
@@ -26,15 +39,17 @@ const PeopleManager: React.FC = () => {
       id: crypto.randomUUID(),
       name: newName.trim()
     };
-    await db.people.add(newPerson);
+    const next = [...readPeopleFromStorage(), newPerson];
+    writePeopleToStorage(next);
     setNewName("");
-    loadPeople();
+    setPeople(next);
   };
 
   const deletePerson = async (id: string, name: string) => {
-    if (window.confirm(`¿Estás seguro de que quieres eliminar a ${name} de la base de datos global?`)) {
-      await db.people.delete(id);
-      loadPeople();
+    if (window.confirm(`¿Estás seguro de que quieres eliminar a ${name}?`)) {
+      const next = readPeopleFromStorage().filter((p) => p.id !== id);
+      writePeopleToStorage(next);
+      setPeople(next);
     }
   };
 
@@ -45,9 +60,12 @@ const PeopleManager: React.FC = () => {
 
   const saveEdit = async () => {
     if (editingId && editName.trim()) {
-      await db.people.update(editingId, { name: editName.trim() });
+      const next = readPeopleFromStorage().map((p) =>
+        p.id === editingId ? { ...p, name: editName.trim() } : p
+      );
+      writePeopleToStorage(next);
       setEditingId(null);
-      loadPeople();
+      setPeople(next);
     }
   };
 

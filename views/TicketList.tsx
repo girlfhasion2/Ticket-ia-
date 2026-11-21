@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
 import { Ticket } from '../types';
-import { ChevronRight, Calendar, Store, Receipt, Trash2 } from 'lucide-react';
+import { ChevronRight, Calendar, Store, Receipt, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -13,10 +13,21 @@ interface TicketListProps {
 
 const TicketList: React.FC<TicketListProps> = ({ onSelectTicket, onCreateTicket }) => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const loadTickets = async () => {
-    const allTickets = await db.tickets.orderBy('date').reverse().toArray();
-    setTickets(allTickets);
+    setIsLoading(true);
+    setError(null);
+    try {
+      const allTickets = await db.tickets.orderBy('date').reverse().toArray();
+      setTickets(allTickets);
+    } catch (err: any) {
+      console.warn('Error loading tickets:', err?.message || err);
+      setError(err?.message || 'No se pudieron cargar tus tickets desde Supabase.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -26,8 +37,12 @@ const TicketList: React.FC<TicketListProps> = ({ onSelectTicket, onCreateTicket 
   const handleDeleteTicket = async (e: React.MouseEvent, id: string, merchant: string) => {
     e.stopPropagation(); // Evita que se abra el detalle del ticket
     if (window.confirm(`¿Seguro que quieres borrar el ticket de ${merchant}?`)) {
-      await db.tickets.delete(id);
-      loadTickets();
+      try {
+        await db.tickets.delete(id);
+        await loadTickets();
+      } catch (err: any) {
+        setError(err?.message || 'No se pudo eliminar el ticket.');
+      }
     }
   };
 
@@ -45,7 +60,28 @@ const TicketList: React.FC<TicketListProps> = ({ onSelectTicket, onCreateTicket 
         <p className="text-sm text-gray-500">Gestiona y reparte tus gastos</p>
       </header>
 
-      {Object.keys(groupedTickets).length === 0 ? (
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-700 text-xs font-medium">
+          <AlertCircle size={18} className="shrink-0 mt-0.5" />
+          <span className="flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={loadTickets}
+            className="font-black uppercase tracking-widest text-[10px] underline"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-20 bg-white rounded-2xl shadow-sm border border-gray-100">
+          <RefreshCw size={32} className="mx-auto text-indigo-600 animate-spin mb-3" />
+          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">
+            Cargando tickets...
+          </p>
+        </div>
+      ) : Object.keys(groupedTickets).length === 0 ? (
         <div className="text-center py-20 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300">
           <Receipt size={48} className="mx-auto text-gray-300 mb-4" />
           <p className="text-gray-500">No hay tickets registrados aún.</p>

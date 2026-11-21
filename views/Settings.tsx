@@ -3,12 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../db';
 import { Ticket } from '../types';
 import { 
-  Download, Upload, Trash2, Info, ShieldCheck, 
-  FileSpreadsheet, Check, X, Calendar, Store 
+  Download, Upload, Trash2, ShieldCheck, 
+  FileSpreadsheet, Check, X, Calendar, Store, LogOut, Mail
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useAuth } from '../src/contexts/AuthContext';
 
 const Settings: React.FC = () => {
+  const { user, signOut } = useAuth();
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
@@ -26,9 +28,8 @@ const Settings: React.FC = () => {
   };
 
   const exportData = async () => {
-    const tickets = await db.tickets.toArray();
-    const people = await db.people.toArray();
-    const data = JSON.stringify({ tickets, people }, null, 2);
+    const allTickets = await db.tickets.toArray();
+    const data = JSON.stringify({ tickets: allTickets }, null, 2);
     
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -101,10 +102,9 @@ const Settings: React.FC = () => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const { tickets, people } = JSON.parse(event.target?.result as string);
+        const { tickets: importedTickets } = JSON.parse(event.target?.result as string);
         if (window.confirm("Se van a sobreescribir o añadir datos externos. ¿Continuar?")) {
-          for (const p of people) await db.people.put(p);
-          for (const t of tickets) await db.tickets.put(t);
+          for (const t of importedTickets || []) await db.tickets.put(t);
           window.alert("Importación completada con éxito.");
           window.location.reload();
         }
@@ -116,10 +116,9 @@ const Settings: React.FC = () => {
   };
 
   const clearDatabase = async () => {
-    if (window.confirm("¿ESTÁS SEGURO? Esto borrará permanentemente todos tus tickets y personas de este dispositivo.")) {
+    if (window.confirm("¿ESTÁS SEGURO? Esto borrará permanentemente todos tus tickets de tu cuenta.")) {
       await db.tickets.clear();
-      await db.people.clear();
-      window.alert("Base de datos limpia.");
+      window.alert("Tickets eliminados.");
       window.location.reload();
     }
   };
@@ -132,6 +131,40 @@ const Settings: React.FC = () => {
       </header>
 
       <div className="space-y-4 pb-20">
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-50">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
+              <Mail size={18} className="text-indigo-600" />
+              Cuenta en la Nube
+            </h3>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="p-4 bg-indigo-50/70 rounded-2xl border border-indigo-100">
+              <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">
+                Sesión iniciada como
+              </p>
+              <p className="text-sm font-bold text-indigo-950 truncate">
+                {user?.email || 'Usuario autenticado'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => signOut()}
+              className="w-full flex items-center justify-between p-4 bg-gray-50 rounded-2xl hover:bg-red-50 hover:text-red-700 transition-colors group active-scale"
+            >
+              <div className="text-left">
+                <p className="font-bold text-gray-800 group-hover:text-red-700 text-sm">
+                  Cerrar sesión
+                </p>
+                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">
+                  Desconectar tu cuenta de este dispositivo
+                </p>
+              </div>
+              <LogOut size={22} className="text-gray-400 group-hover:text-red-600" />
+            </button>
+          </div>
+        </section>
+
         <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-4 border-b border-gray-50">
             <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
@@ -197,10 +230,10 @@ const Settings: React.FC = () => {
         <div className="p-6 bg-indigo-50 rounded-2xl space-y-3">
           <div className="flex items-center gap-2 text-indigo-700 font-black text-xs uppercase tracking-widest">
             <ShieldCheck size={18} />
-            Privacidad Offline
+            Sincronización Segura
           </div>
           <p className="text-[11px] text-indigo-600/80 font-bold leading-relaxed">
-            Tus datos se guardan exclusivamente en tu dispositivo. Al exportar a Excel, el procesamiento se realiza localmente en tu navegador.
+            Tus tickets se guardan asociados a tu cuenta en Supabase. Al exportar a Excel, el archivo se genera directamente en tu navegador.
           </p>
         </div>
       </div>

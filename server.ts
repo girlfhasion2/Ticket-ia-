@@ -7,9 +7,27 @@ import { GoogleGenAI, Type } from "@google/genai";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-if (!process.env.GEMINI_API_KEY && fs.existsSync(path.resolve(__dirname, ".env.local"))) {
+const envLocalPath = path.resolve(__dirname, ".env.local");
+if (fs.existsSync(envLocalPath)) {
   try {
-    process.loadEnvFile(path.resolve(__dirname, ".env.local"));
+    const raw = fs.readFileSync(envLocalPath, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      let val = trimmed.slice(eqIdx + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (key && !(key in process.env)) {
+        process.env[key] = val;
+      }
+    }
   } catch {
     // Ignore if env file cannot be read
   }
@@ -19,6 +37,19 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: "25mb" }));
+
+app.get("/api/public-config", (_req, res) => {
+  const supabaseUrl =
+    process.env.VITE_SUPABASE_URL?.trim() ||
+    process.env.SUPABASE_URL?.trim() ||
+    "";
+  const supabaseAnonKey =
+    process.env.VITE_SUPABASE_ANON_KEY?.trim() ||
+    process.env.SUPABASE_ANON_KEY?.trim() ||
+    "";
+
+  res.json({ supabaseUrl, supabaseAnonKey });
+});
 
 const OCR_PROMPT = `Analyze this receipt image. Extract all line items into a structured list.
 If the text is in Spanish, keep it in Spanish.
@@ -238,8 +269,41 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false, ws: false },
       appType: "spa",
+    });
+    app.get("/@vite/client", (_req, res) => {
+      res.type("application/javascript").send(
+        `export class ErrorOverlay {}
+export function createHotContext() {
+  return {
+    accept() {},
+    prune() {},
+    dispose() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function updateStyle(id, css) {
+  let el = document.querySelector('style[data-vite-dev-id="' + id + '"]');
+  if (!el) {
+    el = document.createElement('style');
+    el.setAttribute('data-vite-dev-id', id);
+    document.head.appendChild(el);
+  }
+  el.textContent = css;
+}
+export function removeStyle(id) {
+  const el = document.querySelector('style[data-vite-dev-id="' + id + '"]');
+  if (el) el.remove();
+}
+export function injectQuery(url) {
+  return url;
+}`
+      );
     });
     app.use(vite.middlewares);
   } else {
