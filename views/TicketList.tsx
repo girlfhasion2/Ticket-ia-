@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
-import { Ticket, Category, TicketSortConfig } from '../types';
+import { Ticket, Category, TicketSortConfig, TicketStatus } from '../types';
 import CategoryManagerModal from '../components/CategoryManagerModal';
 import SortTicketsModal from '../components/SortTicketsModal';
 import {
-  ChevronRight,
   Calendar,
   Store,
   Receipt,
@@ -16,6 +15,9 @@ import {
   X,
   Tag,
   ArrowUpDown,
+  MoreVertical,
+  CreditCard,
+  RotateCcw,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -54,6 +56,7 @@ const TicketList: React.FC<TicketListProps> = ({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const longPressTimerRef = useRef<number | null>(null);
   const pressStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -233,6 +236,35 @@ const TicketList: React.FC<TicketListProps> = ({
     }
   };
 
+  const handleUpdateStatus = async (id: string, status: TicketStatus) => {
+    setOpenMenuId(null);
+    try {
+      const t = tickets.find((tk) => tk.id === id);
+      if (!t) return;
+      const updated = { ...t, status };
+      await db.tickets.put(updated);
+      setTickets((prev) => prev.map((tk) => (tk.id === id ? updated : tk)));
+    } catch (err: any) {
+      console.warn('Error updating ticket status:', err?.message || err);
+    }
+  };
+
+  const getStatusBadge = (status?: TicketStatus) => {
+    if (!status || status === 'borrador') return null;
+    if (status === 'repartido') {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-100 text-orange-600">
+          Repartido
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-green-100 text-green-700">
+        Pagado
+      </span>
+    );
+  };
+
   const getMerchantDisplayName = (ticket: Ticket): string =>
     ticket.merchant &&
     ticket.merchant.trim() &&
@@ -293,7 +325,7 @@ const TicketList: React.FC<TicketListProps> = ({
   const deleteCount = pendingDeleteIds?.length || 0;
 
   return (
-    <div className="p-4 bg-gray-50 min-h-full">
+    <div className="p-4 bg-gray-50 min-h-full" onClick={() => openMenuId && setOpenMenuId(null)}>
       <header className="mb-4 flex items-center justify-between gap-3">
         {selectionMode ? (
           <>
@@ -532,24 +564,76 @@ const TicketList: React.FC<TicketListProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
-                      <span className="text-lg font-bold text-gray-900 tabular-nums">
-                        {ticket.totalAmount.toLocaleString('es-ES', {
-                          style: 'currency',
-                          currency: 'EUR',
-                        })}
-                      </span>
+                      <div className="text-right">
+                        <span className="text-lg font-bold text-gray-900 tabular-nums block">
+                          {ticket.totalAmount.toLocaleString('es-ES', {
+                            style: 'currency',
+                            currency: 'EUR',
+                          })}
+                        </span>
+                        {getStatusBadge(ticket.status)}
+                      </div>
                       {!selectionMode && (
-                        <div className="flex items-center">
+                        <div className="relative">
                           <button
                             type="button"
-                            aria-label={`Eliminar ticket de ${merchantName}`}
+                            aria-label={`Opciones de ${merchantName}`}
                             onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => handleSingleTrashClick(e, ticket.id)}
-                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg active-scale transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearLongPressTimer();
+                              setOpenMenuId(openMenuId === ticket.id ? null : ticket.id);
+                            }}
+                            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg active-scale transition-colors"
                           >
-                            <Trash2 size={18} />
+                            <MoreVertical size={18} />
                           </button>
-                          <ChevronRight size={18} className="text-gray-300" />
+                          {openMenuId === ticket.id && (
+                            <div
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[180px] py-2 overflow-hidden"
+                            >
+                              {(!ticket.status || ticket.status === 'borrador') && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-orange-600 hover:bg-orange-50 transition-colors"
+                                >
+                                  <CreditCard size={16} />
+                                  Marcar repartido
+                                </button>
+                              )}
+                              {ticket.status === 'repartido' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
+                                >
+                                  <Check size={16} />
+                                  Marcar como pagado
+                                </button>
+                              )}
+                              {ticket.status === 'pagado' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                                >
+                                  <RotateCcw size={16} />
+                                  Reabrir ticket
+                                </button>
+                              )}
+                              <div className="border-t border-gray-100 my-1" />
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); handleSingleTrashClick(e, ticket.id); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 size={16} />
+                                Eliminar
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -620,24 +704,76 @@ const TicketList: React.FC<TicketListProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
-                  <span className="text-lg font-bold text-gray-900 tabular-nums">
-                    {ticket.totalAmount.toLocaleString('es-ES', {
-                      style: 'currency',
-                      currency: 'EUR',
-                    })}
-                  </span>
+                  <div className="text-right">
+                    <span className="text-lg font-bold text-gray-900 tabular-nums block">
+                      {ticket.totalAmount.toLocaleString('es-ES', {
+                        style: 'currency',
+                        currency: 'EUR',
+                      })}
+                    </span>
+                    {getStatusBadge(ticket.status)}
+                  </div>
                   {!selectionMode && (
-                    <div className="flex items-center">
+                    <div className="relative">
                       <button
                         type="button"
-                        aria-label={`Eliminar ticket de ${merchantName}`}
+                        aria-label={`Opciones de ${merchantName}`}
                         onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => handleSingleTrashClick(e, ticket.id)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg active-scale transition-colors"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearLongPressTimer();
+                          setOpenMenuId(openMenuId === ticket.id ? null : ticket.id);
+                        }}
+                        className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg active-scale transition-colors"
                       >
-                        <Trash2 size={18} />
+                        <MoreVertical size={18} />
                       </button>
-                      <ChevronRight size={18} className="text-gray-300" />
+                      {openMenuId === ticket.id && (
+                        <div
+                          onPointerDown={(e) => e.stopPropagation()}
+                          className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[180px] py-2 overflow-hidden"
+                        >
+                          {(!ticket.status || ticket.status === 'borrador') && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-orange-600 hover:bg-orange-50 transition-colors"
+                            >
+                              <CreditCard size={16} />
+                              Marcar repartido
+                            </button>
+                          )}
+                          {ticket.status === 'repartido' && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
+                            >
+                              <Check size={16} />
+                              Marcar como pagado
+                            </button>
+                          )}
+                          {ticket.status === 'pagado' && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                              <RotateCcw size={16} />
+                              Reabrir ticket
+                            </button>
+                          )}
+                          <div className="border-t border-gray-100 my-1" />
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); handleSingleTrashClick(e, ticket.id); }}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={16} />
+                            Eliminar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
