@@ -19,16 +19,32 @@ export interface TicketLine {
   assignments: Assignment[];
 }
 
+export interface Category {
+  id: string;
+  user_id?: string;
+  name: string;
+  created_at?: string;
+}
+
 export interface Ticket {
   id: string;
   merchant: string;
   date: string;
   totalAmount: number;
+  categoryId?: string;
   imageBase64?: string;
   participants: Person[];
   lines: TicketLine[];
   discardedLines: TicketLine[]; // Nuevo: para elementos quitados del cálculo
   createdAt: number;
+}
+
+export type SortField = 'date' | 'name' | 'amount';
+export type SortDirection = 'asc' | 'desc';
+
+export interface TicketSortConfig {
+  field: SortField;
+  direction: SortDirection;
 }
 
 export interface AppState {

@@ -7,6 +7,7 @@ import {
   wasRecoveryDetected,
   clearRecoveryDetected,
 } from '../lib/supabase';
+import { db } from '../../db';
 
 interface AuthResult {
   error: AuthError | Error | null;
@@ -138,6 +139,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: email.trim(),
       password,
     });
+
+    if (!error && data.session && data.user) {
+      await db.categories.seedDefaults().catch(() => {});
+    }
 
     const needsEmailConfirmation = Boolean(!error && data.user && !data.session);
     return { error, needsEmailConfirmation };

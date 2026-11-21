@@ -1,6 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabaseReady } from './src/lib/supabase';
-import { Ticket } from './types';
+import { Ticket, Category } from './types';
+
+const DEFAULT_CATEGORY_NAMES = ['Restaurante', 'Casa', 'Viaje', 'Evento'] as const;
+const seedingInFlight = new Map<string, Promise<Category[]>>();
 
 interface TicketRow {
   id: string;
@@ -11,20 +14,21 @@ interface TicketRow {
 
 function formatDbError(
   action: string,
-  error: { code?: string; message?: string; hint?: string }
+  error: { code?: string; message?: string; hint?: string },
+  table: 'tickets' | 'categories' = 'tickets'
 ): Error {
   const code = error.code || '';
   const msg = error.message || 'Error desconocido de Supabase.';
 
   if (code === '42501' || msg.toLowerCase().includes('permission denied')) {
     return new Error(
-      `Permisos insuficientes en Supabase (${action}). Ejecuta en el SQL Editor de Supabase: GRANT USAGE ON SCHEMA public TO authenticated; GRANT ALL ON TABLE public.tickets TO authenticated;`
+      `Permisos insuficientes en Supabase (${action}). Ejecuta en el SQL Editor de Supabase: GRANT USAGE ON SCHEMA public TO authenticated; GRANT ALL ON TABLE public.${table} TO authenticated;`
     );
   }
 
   if (code === '42P01' || code === 'PGRST205') {
     return new Error(
-      `La tabla "tickets" no existe en Supabase (${action}). Crea la tabla con el esquema SQL proporcionado.`
+      `La tabla "${table}" no existe en Supabase (${action}). Crea la tabla con el esquema SQL proporcionado.`
     );
   }
 
@@ -42,7 +46,7 @@ async function getReadyClientAndUserId(): Promise<{
   } = await client.auth.getUser();
 
   if (error || !user) {
-    throw new Error('Debes iniciar sesión para acceder a tus tickets.');
+    throw new Error('Debes iniciar sesión para acceder a tus datos.');
   }
 
   return { client, userId: user.id };
@@ -76,7 +80,7 @@ async function fetchUserTickets(): Promise<Ticket[]> {
     .eq('user_id', userId);
 
   if (error) {
-    throw formatDbError('obtener los tickets', error);
+    throw formatDbError('obtener los tickets', error, 'tickets');
   }
 
   return ((data as Pick<TicketRow, 'data'>[] | null) || []).map((row) => row.data);
@@ -93,7 +97,7 @@ class SupabaseTicketsStore {
       .maybeSingle<Pick<TicketRow, 'data'>>();
 
     if (error) {
-      throw formatDbError('cargar el ticket', error);
+      throw formatDbError('cargar el ticket', error, 'tickets');
     }
 
     return data?.data;
@@ -108,7 +112,7 @@ class SupabaseTicketsStore {
     });
 
     if (error) {
-      throw formatDbError('crear el ticket', error);
+      throw formatDbError('crear el ticket', error, 'tickets');
     }
 
     return ticket.id;
@@ -126,7 +130,7 @@ class SupabaseTicketsStore {
     );
 
     if (error) {
-      throw formatDbError('guardar el ticket', error);
+      throw formatDbError('guardar el ticket', error, 'tickets');
     }
 
     return ticket.id;
@@ -141,7 +145,7 @@ class SupabaseTicketsStore {
       .eq('user_id', userId);
 
     if (error) {
-      throw formatDbError('eliminar el ticket', error);
+      throw formatDbError('eliminar el ticket', error, 'tickets');
     }
   }
 
@@ -155,7 +159,7 @@ class SupabaseTicketsStore {
       .eq('user_id', userId);
 
     if (error) {
-      throw formatDbError('eliminar los tickets', error);
+      throw formatDbError('eliminar los tickets', error, 'tickets');
     }
   }
 
@@ -167,7 +171,7 @@ class SupabaseTicketsStore {
       .eq('user_id', userId);
 
     if (error) {
-      throw formatDbError('borrar los tickets', error);
+      throw formatDbError('borrar los tickets', error, 'tickets');
     }
   }
 
@@ -191,6 +195,194 @@ class SupabaseTicketsStore {
   }
 }
 
+function getSeedStorageKey(userId: string): string {
+  return `ticketsplit_categories_seeded_${userId}`;
+}
+
+function markCategoriesSeeded(userId: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(getSeedStorageKey(userId), '1');
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function wasCategoriesSeeded(userId: string): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(getSeedStorageKey(userId)) === '1';
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return false;
+}
+
+class SupabaseCategoriesStore {
+  async seedDefaults(): Promise<Category[]> {
+    const { client, userId } = await getReadyClientAndUserId();
+
+    const existingPromise = seedingInFlight.get(userId);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const promise = (async () => {
+      const { data: existing, error: fetchError } = await client
+        .from('categories')
+        .select('id, user_id, name, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+
+      if (fetchError) {
+        throw formatDbError('obtener las categorías', fetchError, 'categories');
+      }
+
+      if (existing && existing.length > 0) {
+        markCategoriesSeeded(userId);
+        return existing as Category[];
+      }
+
+      const payload = DEFAULT_CATEGORY_NAMES.map((name) => ({
+        user_id: userId,
+        name,
+      }));
+
+      const { data: inserted, error: insertError } = await client
+        .from('categories')
+        .insert(payload)
+        .select('id, user_id, name, created_at');
+
+      if (insertError) {
+        throw formatDbError('crear las categorías iniciales', insertError, 'categories');
+      }
+
+      markCategoriesSeeded(userId);
+      return (inserted as Category[]) || [];
+    })().finally(() => {
+      seedingInFlight.delete(userId);
+    });
+
+    seedingInFlight.set(userId, promise);
+    return promise;
+  }
+
+  async toArray(): Promise<Category[]> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { data, error } = await client
+      .from('categories')
+      .select('id, user_id, name, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      throw formatDbError('obtener las categorías', error, 'categories');
+    }
+
+    const categories = (data as Category[] | null) || [];
+    if (categories.length === 0 && !wasCategoriesSeeded(userId)) {
+      return this.seedDefaults();
+    }
+
+    if (categories.length > 0) {
+      markCategoriesSeeded(userId);
+    }
+
+    return categories;
+  }
+
+  async add(name: string): Promise<Category> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error('El nombre de la categoría no puede estar vacío.');
+    }
+
+    const { client, userId } = await getReadyClientAndUserId();
+    const { data, error } = await client
+      .from('categories')
+      .insert({
+        user_id: userId,
+        name: trimmed,
+      })
+      .select('id, user_id, name, created_at')
+      .single<Category>();
+
+    if (error || !data) {
+      throw formatDbError(
+        'crear la categoría',
+        error || { message: 'No se recibió respuesta.' },
+        'categories'
+      );
+    }
+
+    markCategoriesSeeded(userId);
+    return data;
+  }
+
+  async update(id: string, name: string): Promise<Category> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error('El nombre de la categoría no puede estar vacío.');
+    }
+
+    const { client, userId } = await getReadyClientAndUserId();
+    const { data, error } = await client
+      .from('categories')
+      .update({ name: trimmed })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id, user_id, name, created_at')
+      .single<Category>();
+
+    if (error || !data) {
+      throw formatDbError(
+        'actualizar la categoría',
+        error || { message: 'No se encontró la categoría.' },
+        'categories'
+      );
+    }
+
+    return data;
+  }
+
+  async delete(id: string): Promise<void> {
+    const { client, userId } = await getReadyClientAndUserId();
+    const { error } = await client
+      .from('categories')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw formatDbError('eliminar la categoría', error, 'categories');
+    }
+
+    // Clear categoryId from any tickets referencing the deleted category
+    try {
+      const tickets = await fetchUserTickets();
+      const affected = tickets.filter((t) => t.categoryId === id);
+      if (affected.length > 0) {
+        await Promise.all(
+          affected.map((t) => {
+            const { categoryId: _removed, ...rest } = t;
+            return client
+              .from('tickets')
+              .upsert(
+                { id: t.id, user_id: userId, data: rest },
+                { onConflict: 'id' }
+              );
+          })
+        );
+      }
+    } catch {
+      // Non-fatal if cleanup fails
+    }
+  }
+}
+
 export const db = {
   tickets: new SupabaseTicketsStore(),
+  categories: new SupabaseCategoriesStore(),
 };

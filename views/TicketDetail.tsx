@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
-import { Ticket, Person, TicketLine, Assignment } from '../types';
+import { Ticket, Person, TicketLine, Assignment, Category } from '../types';
 import { parseTicketImage } from '../geminiService';
 import { 
   ArrowLeft, Camera, Images, Trash2, Plus, Users, 
@@ -23,6 +23,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
       ? { ...initialTicket, discardedLines: initialTicket.discardedLines || [] }
       : null
   );
+  const [categories, setCategories] = useState<Category[]>([]);
   const [activeTab, setActiveTab] = useState<'info' | 'items' | 'split' | 'summary'>('info');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
@@ -60,6 +61,21 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     };
     loadData();
   }, [ticketId, initialTicket]);
+
+  useEffect(() => {
+    let active = true;
+    db.categories
+      .toArray()
+      .then((cats) => {
+        if (active) setCategories(cats);
+      })
+      .catch(() => {
+        // Ignore if categories table is not ready yet
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (!ticket) return <div className="p-8 text-center font-medium text-gray-500 italic">Cargando ticket...</div>;
 
@@ -481,6 +497,32 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Establecimiento</label>
                 <input type="text" placeholder="Sin nombre" value={merchantInputValue} onChange={(e) => saveTicketAndSyncTotal({...ticket, merchant: e.target.value})} className="w-full bg-transparent border-b border-gray-200 py-1 font-bold text-xl text-indigo-900 focus:outline-none focus:border-indigo-500 transition-colors" />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor="ticket-category-select"
+                  className="text-[10px] font-black text-gray-400 uppercase tracking-widest block"
+                >
+                  Categoría
+                </label>
+                <select
+                  id="ticket-category-select"
+                  value={ticket.categoryId || ''}
+                  onChange={(e) =>
+                    saveTicketAndSyncTotal({
+                      ...ticket,
+                      categoryId: e.target.value || undefined,
+                    })
+                  }
+                  className="w-full bg-transparent border-b border-gray-200 py-1.5 font-bold text-sm text-gray-700 focus:outline-none focus:border-indigo-500 transition-colors"
+                >
+                  <option value="">Sin categoría</option>
+                  {categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-6">
                 <div className="space-y-1">

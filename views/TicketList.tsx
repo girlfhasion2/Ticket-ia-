@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
-import { Ticket } from '../types';
+import { Ticket, Category, TicketSortConfig } from '../types';
+import CategoryManagerModal from '../components/CategoryManagerModal';
+import SortTicketsModal from '../components/SortTicketsModal';
 import {
   ChevronRight,
   Calendar,
@@ -12,6 +14,8 @@ import {
   CheckSquare,
   Check,
   X,
+  Tag,
+  ArrowUpDown,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -20,8 +24,11 @@ interface TicketListProps {
   onSelectTicket: (id: string) => void;
   onCreateTicket: () => void;
   onSelectionModeChange?: (active: boolean) => void;
+  sortConfig?: TicketSortConfig;
+  onSortChange?: (sort: TicketSortConfig) => void;
 }
 
+const DEFAULT_SORT: TicketSortConfig = { field: 'date', direction: 'desc' };
 const LONG_PRESS_MS = 450;
 const MOVE_THRESHOLD_PX = 10;
 
@@ -29,8 +36,17 @@ const TicketList: React.FC<TicketListProps> = ({
   onSelectTicket,
   onCreateTicket,
   onSelectionModeChange,
+  sortConfig: controlledSortConfig,
+  onSortChange,
 }) => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [localSortConfig, setLocalSortConfig] = useState<TicketSortConfig>(DEFAULT_SORT);
+  const sortConfig = controlledSortConfig ?? localSortConfig;
+  const setSortConfig = onSortChange ?? setLocalSortConfig;
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,8 +76,25 @@ const TicketList: React.FC<TicketListProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const allTickets = await db.tickets.orderBy('date').reverse().toArray();
-      setTickets(allTickets);
+      const [ticketsRes, categoriesRes] = await Promise.allSettled([
+        db.tickets.orderBy('date').reverse().toArray(),
+        db.categories.toArray(),
+      ]);
+
+      if (ticketsRes.status === 'fulfilled') {
+        setTickets(ticketsRes.value);
+      } else {
+        throw ticketsRes.reason;
+      }
+
+      if (categoriesRes.status === 'fulfilled') {
+        setCategories(categoriesRes.value);
+      } else {
+        console.warn(
+          'Error loading categories:',
+          categoriesRes.reason?.message || categoriesRes.reason
+        );
+      }
     } catch (err: any) {
       console.warn('Error loading tickets:', err?.message || err);
       setError(err?.message || 'No se pudieron cargar tus tickets desde Supabase.');
@@ -92,11 +125,26 @@ const TicketList: React.FC<TicketListProps> = ({
     );
   };
 
+  const toggleCategoryFilter = (categoryId: string) => {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId)
+        ? prev.filter((id) => id !== categoryId)
+        : [...prev, categoryId]
+    );
+  };
+
+  const filteredTickets =
+    selectedCategoryIds.length === 0
+      ? tickets
+      : tickets.filter(
+          (t) => Boolean(t.categoryId) && selectedCategoryIds.includes(t.categoryId!)
+        );
+
   const toggleSelectAll = () => {
-    if (selectedIds.length === tickets.length) {
+    if (selectedIds.length === filteredTickets.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(tickets.map((t) => t.id));
+      setSelectedIds(filteredTickets.map((t) => t.id));
     }
   };
 
@@ -185,18 +233,68 @@ const TicketList: React.FC<TicketListProps> = ({
     }
   };
 
-  const groupedTickets = tickets.reduce((acc: { [key: string]: Ticket[] }, ticket) => {
-    const month = format(parseISO(ticket.date), 'MMMM yyyy', { locale: es });
-    if (!acc[month]) acc[month] = [];
-    acc[month].push(ticket);
-    return acc;
-  }, {});
+  const getMerchantDisplayName = (ticket: Ticket): string =>
+    ticket.merchant &&
+    ticket.merchant.trim() &&
+    ticket.merchant.trim().toLowerCase() !== 'null'
+      ? ticket.merchant.trim()
+      : 'Sin nombre';
+
+  const sortedFilteredTickets = [...filteredTickets].sort((a, b) => {
+    if (sortConfig.field === 'name') {
+      const cmp = getMerchantDisplayName(a).localeCompare(
+        getMerchantDisplayName(b),
+        'es',
+        { sensitivity: 'base' }
+      );
+      if (cmp !== 0) {
+        return sortConfig.direction === 'asc' ? cmp : -cmp;
+      }
+      return b.createdAt - a.createdAt;
+    }
+
+    if (sortConfig.field === 'amount') {
+      const cmp = a.totalAmount - b.totalAmount;
+      if (cmp !== 0) {
+        return sortConfig.direction === 'asc' ? cmp : -cmp;
+      }
+      return b.createdAt - a.createdAt;
+    }
+
+    const dateCmp = a.date.localeCompare(b.date);
+    if (dateCmp !== 0) {
+      return sortConfig.direction === 'asc' ? dateCmp : -dateCmp;
+    }
+    return sortConfig.direction === 'asc'
+      ? a.createdAt - b.createdAt
+      : b.createdAt - a.createdAt;
+  });
+
+  const groupedTickets = sortedFilteredTickets.reduce(
+    (acc: { [key: string]: Ticket[] }, ticket) => {
+      const month = format(parseISO(ticket.date), 'MMMM yyyy', { locale: es });
+      if (!acc[month]) acc[month] = [];
+      acc[month].push(ticket);
+      return acc;
+    },
+    {}
+  );
+
+  const isDefaultSort =
+    sortConfig.field === 'date' && sortConfig.direction === 'desc';
+
+  const categoryMap = new Map<string, string>(
+    categories.map((cat) => [cat.id, cat.name])
+  );
+  const activeCategoryNames = selectedCategoryIds
+    .map((id) => categoryMap.get(id))
+    .filter((name): name is string => Boolean(name));
 
   const deleteCount = pendingDeleteIds?.length || 0;
 
   return (
     <div className="p-4 bg-gray-50 min-h-full">
-      <header className="mb-6 flex items-center justify-between gap-3">
+      <header className="mb-4 flex items-center justify-between gap-3">
         {selectionMode ? (
           <>
             <div>
@@ -212,13 +310,13 @@ const TicketList: React.FC<TicketListProps> = ({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {tickets.length > 0 && (
+              {filteredTickets.length > 0 && (
                 <button
                   type="button"
                   onClick={toggleSelectAll}
                   className="px-3 py-2 rounded-xl text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active-scale transition-colors"
                 >
-                  {selectedIds.length === tickets.length ? 'Ninguno' : 'Todos'}
+                  {selectedIds.length === filteredTickets.length ? 'Ninguno' : 'Todos'}
                 </button>
               )}
               <button
@@ -238,19 +336,86 @@ const TicketList: React.FC<TicketListProps> = ({
               <p className="text-sm text-gray-500">Gestiona y reparte tus gastos</p>
             </div>
             {tickets.length > 0 && (
-              <button
-                type="button"
-                onClick={() => enterSelectionMode()}
-                aria-label="Seleccionar tickets"
-                className="p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                <CheckSquare size={18} />
-                <span className="text-xs font-bold">Seleccionar</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSortModal(true)}
+                  aria-label="Ordenar tickets"
+                  className="relative p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <ArrowUpDown size={18} />
+                  <span className="text-xs font-bold">Ordenar</span>
+                  {!isDefaultSort && (
+                    <span
+                      aria-label="Orden personalizado activo"
+                      className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-purple-600 ring-2 ring-gray-50"
+                    />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => enterSelectionMode()}
+                  aria-label="Seleccionar tickets"
+                  className="p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center gap-1.5 shadow-sm"
+                >
+                  <CheckSquare size={18} />
+                  <span className="text-xs font-bold">Seleccionar</span>
+                </button>
+              </div>
             )}
           </>
         )}
       </header>
+
+      {/* Fila horizontal de chips de categorías */}
+      <div className="mb-5">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setShowCategoryManager(true)}
+            aria-label="Gestionar categorías"
+            className="w-9 h-9 rounded-full bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-300 flex items-center justify-center shrink-0 shadow-sm active-scale transition-colors"
+          >
+            <Tag size={16} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSelectedCategoryIds([])}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 border transition-colors active-scale ${
+              selectedCategoryIds.length === 0
+                ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
+            }`}
+          >
+            Todos
+          </button>
+
+          {categories.map((cat) => {
+            const isSelected = selectedCategoryIds.includes(cat.id);
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => toggleCategoryFilter(cat.id)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap shrink-0 border transition-colors active-scale ${
+                  isSelected
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                    : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:text-indigo-600'
+                }`}
+              >
+                {cat.name}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeCategoryNames.length > 0 && (
+          <p className="text-xs text-indigo-600 font-semibold mt-1.5 px-1">
+            Categorías activas: {activeCategoryNames.join(', ')}
+          </p>
+        )}
+      </div>
 
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-700 text-xs font-medium">
@@ -274,18 +439,34 @@ const TicketList: React.FC<TicketListProps> = ({
           </p>
         </div>
       ) : Object.keys(groupedTickets).length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300">
-          <Receipt size={48} className="mx-auto text-gray-300 mb-4" />
-          <p className="text-gray-500">No hay tickets registrados aún.</p>
-          <button
-            type="button"
-            onClick={onCreateTicket}
-            className="mt-4 text-indigo-600 font-semibold underline"
-          >
-            Crea el primero ahora
-          </button>
-        </div>
-      ) : (
+        selectedCategoryIds.length > 0 && tickets.length > 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300 px-4">
+            <Tag size={40} className="mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-500 text-sm">
+              No hay tickets en las categorías seleccionadas.
+            </p>
+            <button
+              type="button"
+              onClick={() => setSelectedCategoryIds([])}
+              className="mt-4 text-indigo-600 text-sm font-semibold underline"
+            >
+              Ver todos los tickets
+            </button>
+          </div>
+        ) : (
+          <div className="text-center py-20 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300">
+            <Receipt size={48} className="mx-auto text-gray-300 mb-4" />
+            <p className="text-gray-500">No hay tickets registrados aún.</p>
+            <button
+              type="button"
+              onClick={onCreateTicket}
+              className="mt-4 text-indigo-600 font-semibold underline"
+            >
+              Crea el primero ahora
+            </button>
+          </div>
+        )
+      ) : sortConfig.field === 'date' ? (
         (Object.entries(groupedTickets) as [string, Ticket[]][]).map(([month, monthTickets]) => (
           <section key={month} className="mb-8">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">
@@ -294,12 +475,7 @@ const TicketList: React.FC<TicketListProps> = ({
             <div className="space-y-3">
               {monthTickets.map((ticket) => {
                 const isSelected = selectedIds.includes(ticket.id);
-                const merchantName =
-                  ticket.merchant &&
-                  ticket.merchant.trim() &&
-                  ticket.merchant.trim().toLowerCase() !== 'null'
-                    ? ticket.merchant.trim()
-                    : 'Sin nombre';
+                const merchantName = getMerchantDisplayName(ticket);
                 return (
                   <div
                     key={ticket.id}
@@ -339,11 +515,18 @@ const TicketList: React.FC<TicketListProps> = ({
                         <h3 className="font-semibold text-gray-900 truncate">
                           {merchantName}
                         </h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <Calendar size={12} />
-                          <span>
-                            {format(parseISO(ticket.date), "dd 'de' MMM", { locale: es })}
+                        <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Calendar size={12} />
+                            <span>
+                              {format(parseISO(ticket.date), "dd 'de' MMM", { locale: es })}
+                            </span>
                           </span>
+                          {ticket.categoryId && categoryMap.has(ticket.categoryId) && (
+                            <span className="text-indigo-600 font-semibold">
+                              · {categoryMap.get(ticket.categoryId)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -376,6 +559,92 @@ const TicketList: React.FC<TicketListProps> = ({
             </div>
           </section>
         ))
+      ) : (
+        <div className="space-y-3 pb-8">
+          {sortedFilteredTickets.map((ticket) => {
+            const isSelected = selectedIds.includes(ticket.id);
+            const merchantName = getMerchantDisplayName(ticket);
+            return (
+              <div
+                key={ticket.id}
+                onPointerDown={(e) => handleCardPointerDown(e, ticket.id)}
+                onPointerMove={handleCardPointerMove}
+                onPointerUp={clearLongPressTimer}
+                onPointerCancel={clearLongPressTimer}
+                onContextMenu={(e) => {
+                  if (selectionMode) e.preventDefault();
+                }}
+                onClick={() => handleCardClick(ticket.id)}
+                className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-colors cursor-pointer relative select-none ${
+                  selectionMode && isSelected
+                    ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-100'
+                    : 'bg-white border-gray-100 active:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                  {selectionMode && (
+                    <div
+                      className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 text-white'
+                          : 'bg-white border-gray-300'
+                      }`}
+                      aria-checked={isSelected}
+                      role="checkbox"
+                    >
+                      {isSelected && <Check size={14} strokeWidth={3} />}
+                    </div>
+                  )}
+
+                  <div className="w-12 h-12 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 shrink-0">
+                    <Store size={24} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-gray-900 truncate">
+                      {merchantName}
+                    </h3>
+                    <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Calendar size={12} />
+                        <span>
+                          {format(parseISO(ticket.date), "dd 'de' MMM yyyy", { locale: es })}
+                        </span>
+                      </span>
+                      {ticket.categoryId && categoryMap.has(ticket.categoryId) && (
+                        <span className="text-indigo-600 font-semibold">
+                          · {categoryMap.get(ticket.categoryId)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
+                  <span className="text-lg font-bold text-gray-900 tabular-nums">
+                    {ticket.totalAmount.toLocaleString('es-ES', {
+                      style: 'currency',
+                      currency: 'EUR',
+                    })}
+                  </span>
+                  {!selectionMode && (
+                    <div className="flex items-center">
+                      <button
+                        type="button"
+                        aria-label={`Eliminar ticket de ${merchantName}`}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => handleSingleTrashClick(e, ticket.id)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg active-scale transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <ChevronRight size={18} className="text-gray-300" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {/* Barra inferior de acciones en modo selección */}
@@ -453,6 +722,32 @@ const TicketList: React.FC<TicketListProps> = ({
           </div>
         </div>
       )}
+      <CategoryManagerModal
+        isOpen={showCategoryManager}
+        categories={categories}
+        onClose={() => setShowCategoryManager(false)}
+        onCategoriesUpdated={(updatedCategories, deletedCategoryId) => {
+          setCategories(updatedCategories);
+          if (deletedCategoryId) {
+            setSelectedCategoryIds((prev) =>
+              prev.filter((id) => id !== deletedCategoryId)
+            );
+            setTickets((prev) =>
+              prev.map((t) =>
+                t.categoryId === deletedCategoryId
+                  ? { ...t, categoryId: undefined }
+                  : t
+              )
+            );
+          }
+        }}
+      />
+      <SortTicketsModal
+        isOpen={showSortModal}
+        currentSort={sortConfig}
+        onClose={() => setShowSortModal(false)}
+        onApply={(nextSort) => setSortConfig(nextSort)}
+      />
     </div>
   );
 };

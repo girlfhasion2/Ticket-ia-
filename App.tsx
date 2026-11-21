@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from './db';
-import { Ticket, AppState } from './types';
+import { Ticket, AppState, TicketSortConfig } from './types';
 import TicketList from './views/TicketList';
 import TicketDetail from './views/TicketDetail';
 import Settings from './views/Settings';
@@ -30,6 +30,10 @@ const App: React.FC = () => {
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
   const [draftTicket, setDraftTicket] = useState<Ticket | undefined>();
   const [isListSelectionMode, setIsListSelectionMode] = useState(false);
+  const [sortConfig, setSortConfig] = useState<TicketSortConfig>({
+    field: 'date',
+    direction: 'desc',
+  });
 
   useEffect(() => {
     const onHashChange = () => {
@@ -79,6 +83,7 @@ const App: React.FC = () => {
       setSelectedTicketId(undefined);
       setDraftTicket(undefined);
       setIsListSelectionMode(false);
+      setSortConfig({ field: 'date', direction: 'desc' });
     }
   }, [user]);
 
@@ -148,6 +153,8 @@ const App: React.FC = () => {
             onSelectTicket={navigateToTicket}
             onCreateTicket={createNewTicket}
             onSelectionModeChange={setIsListSelectionMode}
+            sortConfig={sortConfig}
+            onSortChange={setSortConfig}
           />
         );
       case 'detail':
@@ -170,6 +177,8 @@ const App: React.FC = () => {
             onSelectTicket={navigateToTicket}
             onCreateTicket={createNewTicket}
             onSelectionModeChange={setIsListSelectionMode}
+            sortConfig={sortConfig}
+            onSortChange={setSortConfig}
           />
         );
     }
