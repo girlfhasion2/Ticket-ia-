@@ -5,7 +5,7 @@ import { parseTicketImage } from '../geminiService';
 import {
   ArrowLeft, Camera, Images, Trash2, Plus, Users,
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
-  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw
+  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
@@ -916,18 +916,13 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                          <div key={line.id} className={`border rounded-3xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-2 transition-all ${isFullyAssigned ? 'bg-green-50 border-green-100 opacity-75' : 'bg-white border-gray-100'}`}>
                            <div className={`p-4 flex justify-between items-center text-white transition-colors duration-500 ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
                              <div className="flex items-center gap-2 max-w-[70%]">
-                               {isFullyAssigned && (
-                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                   <polyline points="20,6 9,17 4,12"/>
-                                 </svg>
-                               )}
                                <div>
                                  <h4 className={`font-black text-xs uppercase truncate ${isFullyAssigned ? 'opacity-80' : ''}`}>{line.description}</h4>
                                  <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
                                </div>
                              </div>
-                             <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
-                               {isFullyAssigned ? 'OK' : `${pendingUnits} PEND.`}
+                             <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner flex items-center justify-center ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
+                               {isFullyAssigned ? <Check size={16} strokeWidth={3} /> : `${pendingUnits} PEND.`}
                              </div>
                            </div>
                            <div className="p-4 space-y-4 bg-gray-50/30">
