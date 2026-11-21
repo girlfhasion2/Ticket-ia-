@@ -1,7 +1,9 @@
 import { Ticket } from '../types';
 
-/** Devuelve true si el reparto del ticket está completo (todo asignado y suma igual al total) */
+/** Devuelve true si el reparto del ticket está completo (todo asignado, suma igual al total, y total > 0) */
 export function computeRepartoCompleto(ticket: Ticket): boolean {
+  if (ticket.totalAmount <= 0) return false;
+
   const hasUnassigned = ticket.lines.some((line) => {
     const assigned = line.assignments.reduce((s, a) => s + a.units, 0);
     return line.quantity > assigned + 0.001;
