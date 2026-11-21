@@ -79,8 +79,16 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
 
   if (!ticket) return <div className="p-8 text-center font-medium text-gray-500 italic">Cargando ticket...</div>;
 
+  const ticketHasUsefulData = (t: Ticket): boolean => {
+    return t.participants.length > 0 || t.lines.length > 0 || !!t.imageBase64;
+  };
+
   const persistTicket = (ticketToSave: Ticket): Promise<void> => {
     setTicket(ticketToSave);
+    const shouldSave = isPersistedRef.current || ticketHasUsefulData(ticketToSave);
+    if (!shouldSave) {
+      return Promise.resolve();
+    }
     isPersistedRef.current = true;
     const nextSave = pendingSaveRef.current
       .catch(() => {})
