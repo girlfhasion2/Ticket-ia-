@@ -1,4 +1,3 @@
-
 export interface Person {
   id: string;
   name: string;
@@ -26,12 +25,15 @@ export interface Category {
   created_at?: string;
 }
 
+export type TicketStatus = 'borrador' | 'repartido' | 'pagado';
+
 export interface Ticket {
   id: string;
   merchant: string;
   date: string;
   totalAmount: number;
   categoryId?: string;
+  status?: TicketStatus;
   imageBase64?: string;
   participants: Person[];
   lines: TicketLine[];
