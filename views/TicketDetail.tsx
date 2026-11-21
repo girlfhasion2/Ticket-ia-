@@ -33,6 +33,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [pendingLineModal, setPendingLineModal] = useState<string | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
   const isPersistedRef = useRef<boolean>(!initialTicket);
@@ -368,7 +369,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     userTotals[p.id] = 0;
     personAssignedItems[p.id] = new Map();
   });
-  const pendingAssignments: { description: string; units: number }[] = [];
+  const pendingAssignments: { lineId: string; description: string; units: number }[] = [];
 
   ticket.lines.forEach((line) => {
     const unitsAssignedToPeople = line.assignments.reduce(
@@ -377,7 +378,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     );
     const lineRemaining = line.quantity - unitsAssignedToPeople;
     if (lineRemaining > 0) {
-      pendingAssignments.push({ description: line.description, units: lineRemaining });
+      pendingAssignments.push({ lineId: line.id, description: line.description, units: lineRemaining });
     }
     line.assignments.forEach((asgn) => {
       if (asgn.personIds.length === 0 || asgn.units <= 0) return;
@@ -883,10 +884,15 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 <div className="flex items-center gap-3 text-amber-800 mb-5 font-black text-xs uppercase tracking-widest"><AlertCircle size={20} />Faltan repartos</div>
                 <div className="space-y-3">
                   {pendingAssignments.map((p, i) => (
-                    <div key={i} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-amber-100 shadow-sm">
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setPendingLineModal(p.lineId)}
+                      className="w-full flex justify-between items-center bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:border-indigo-200 hover:shadow-md active-scale transition-all text-left"
+                    >
                       <span className="text-sm font-bold text-gray-700 truncate mr-4">{p.description}</span>
-                      <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-3 py-1.5 rounded-full whitespace-nowrap">{p.units} UDS PEND.</span>
-                    </div>
+                      <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-3 py-1.5 rounded-full whitespace-nowrap shrink-0">{p.units} UDS PEND.</span>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -947,6 +953,14 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                     <CheckCircle2 size={20} />
                     Marcar como pagado
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handleStatusChange('borrador')}
+                    className="w-full py-3 px-6 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-600 font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 active-scale transition-colors"
+                  >
+                    <RotateCcw size={16} />
+                    Reabrir ticket
+                  </button>
                 </>
               )}
 
@@ -984,6 +998,117 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
           </div>
         )}
       </div>
+
+      {/* Mini modal: repartir producto pendiente desde Resumen */}
+      {pendingLineModal && (() => {
+        const line = ticket.lines.find(l => l.id === pendingLineModal);
+        if (!line) return null;
+        const unitsAssigned = line.assignments.reduce((s, a) => s + a.units, 0);
+        const pendingUnits = Math.max(0, line.quantity - unitsAssigned);
+        const isFullyAssigned = pendingUnits <= 0;
+        return (
+          <div
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => setPendingLineModal(null)}
+          >
+            <div
+              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Cabecera del producto */}
+              <div className={`p-5 flex justify-between items-center text-white transition-colors ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
+                <div className="min-w-0 mr-3">
+                  <h4 className="font-black text-sm uppercase truncate">{line.description}</h4>
+                  <p className="text-[11px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500'}`}>
+                    {isFullyAssigned ? 'OK' : `${pendingUnits} PEND.`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingLineModal(null)}
+                    className="p-1.5 bg-white/20 hover:bg-white/30 rounded-xl transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Cuerpo con los grupos de reparto */}
+              <div className="overflow-y-auto flex-1 p-4 space-y-4 bg-gray-50/40">
+                {ticket.participants.length === 0 ? (
+                  <div className="text-center py-10">
+                    <p className="text-gray-500 text-sm font-bold">Añade participantes en la pestaña General primero.</p>
+                  </div>
+                ) : (
+                  <>
+                    {line.assignments.map(asgn => (
+                      <div key={asgn.id} className={`p-4 border rounded-2xl shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex flex-col">
+                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
+                            <input
+                              type="number"
+                              value={asgn.units}
+                              onChange={e => updateAssignment(line.id, asgn.id, { units: parseInt(e.target.value) || 0 })}
+                              className="w-14 bg-gray-50 border border-gray-200 rounded-lg py-1.5 text-center font-black text-indigo-600 focus:outline-none"
+                            />
+                          </div>
+                          <button
+                            onClick={() => deleteAssignment(line.id, asgn.id)}
+                            className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {ticket.participants.map(p => {
+                            const isSelected = asgn.personIds.includes(p.id);
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => {
+                                  const newPids = isSelected
+                                    ? asgn.personIds.filter(id => id !== p.id)
+                                    : [...asgn.personIds, p.id];
+                                  updateAssignment(line.id, asgn.id, { personIds: newPids });
+                                }}
+                                className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+                              >
+                                {p.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {unitsAssigned < line.quantity && (
+                      <button
+                        onClick={() => addAssignment(line.id)}
+                        className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
+                      >
+                        + NUEVO GRUPO DE REPARTO
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setPendingLineModal(null)}
+                  className="w-full py-3.5 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest active-scale"
+                >
+                  Listo
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <LiveCameraModal
         isOpen={showCameraModal}
