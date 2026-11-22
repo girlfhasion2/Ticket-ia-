@@ -45,6 +45,25 @@ const UnitsStepper: React.FC<{
   </div>
 );
 
+/** Zona realmente visible de la pantalla (se reduce cuando aparece el teclado del móvil). */
+const useVisualViewportBox = (active: boolean) => {
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const vv = window.visualViewport;
+    if (!vv) { setBox(null); return; }
+    const update = () => setBox({ top: vv.offsetTop, height: vv.height });
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, [active]);
+  return box;
+};
+
 const PriceInput: React.FC<{
   value: number;
   onChange: (value: number) => void;
@@ -105,6 +124,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [pendingLineModal, setPendingLineModal] = useState<string | null>(null);
   const [personDetailModal, setPersonDetailModal] = useState<string | null>(null);
   const [newLineModal, setNewLineModal] = useState<{ name: string; quantity: number; price: string } | null>(null);
+  const newLineBox = useVisualViewportBox(!!newLineModal);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const newLinePriceRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
@@ -1289,7 +1309,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         );
       })()}
 
-      {/* Modal: añadir un producto nuevo (compacto y anclado arriba para que el teclado no lo tape) */}
+      {/* Modal: añadir un producto nuevo (centrado en la zona visible: sube solo cuando aparece el teclado) */}
       {newLineModal && (() => {
         const price = parsePrice(newLineModal.price);
         const qty = Math.max(0, Math.round(newLineModal.quantity || 0));
@@ -1299,11 +1319,12 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         const lineTotal = canSubmit ? Math.round(qty * price * 100) / 100 : 0;
         return (
           <div
-            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center px-3 pt-[max(env(safe-area-inset-top),12px)] sm:p-4"
+            className="fixed left-0 right-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
+            style={{ top: newLineBox?.top ?? 0, height: newLineBox ? newLineBox.height : '100%' }}
             onClick={() => setNewLineModal(null)}
           >
             <form
-              className="mt-2 sm:mt-0 bg-white w-full sm:max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[calc(100%-1rem)] flex flex-col"
+              className="bg-white w-full sm:max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-full flex flex-col"
               onClick={e => e.stopPropagation()}
               onSubmit={(e) => { e.preventDefault(); void confirmAddLine(); }}
             >
