@@ -1319,12 +1319,16 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         const lineTotal = canSubmit ? Math.round(qty * price * 100) / 100 : 0;
         return (
           <div
-            className="fixed left-0 right-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
-            style={{ top: newLineBox?.top ?? 0, height: newLineBox ? newLineBox.height : '100%' }}
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm"
             onClick={() => setNewLineModal(null)}
           >
+            {/* El fondo oscuro cubre toda la pantalla; la ventana se centra solo en la zona visible */}
+            <div
+              className="absolute left-0 right-0 flex items-center justify-center p-3 sm:p-4 pointer-events-none"
+              style={{ top: newLineBox?.top ?? 0, height: newLineBox ? newLineBox.height : '100%' }}
+            >
             <form
-              className="bg-white w-full sm:max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-full flex flex-col"
+              className="pointer-events-auto bg-white w-full sm:max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-full flex flex-col"
               onClick={e => e.stopPropagation()}
               onSubmit={(e) => { e.preventDefault(); void confirmAddLine(); }}
             >
@@ -1340,7 +1344,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 </button>
               </div>
 
-              <div className="p-4 space-y-3 overflow-y-auto">
+              <div className="p-4 space-y-3 overflow-y-auto overscroll-contain">
                 <label className="block">
                   <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Producto</span>
                   <input
@@ -1407,6 +1411,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 </button>
               </div>
             </form>
+            </div>
           </div>
         );
       })()}
