@@ -106,6 +106,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [personDetailModal, setPersonDetailModal] = useState<string | null>(null);
   const [newLineModal, setNewLineModal] = useState<{ name: string; quantity: number; price: string } | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const newLinePriceRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
   const isPersistedRef = useRef<boolean>(!initialTicket);
   const pendingSaveRef = useRef<Promise<void>>(Promise.resolve());
@@ -1288,7 +1289,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         );
       })()}
 
-      {/* Modal: añadir un producto nuevo */}
+      {/* Modal: añadir un producto nuevo (compacto y anclado arriba para que el teclado no lo tape) */}
       {newLineModal && (() => {
         const price = parsePrice(newLineModal.price);
         const qty = Math.max(0, Math.round(newLineModal.quantity || 0));
@@ -1298,43 +1299,49 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         const lineTotal = canSubmit ? Math.round(qty * price * 100) / 100 : 0;
         return (
           <div
-            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center px-3 pt-[max(env(safe-area-inset-top),12px)] sm:p-4"
             onClick={() => setNewLineModal(null)}
           >
             <form
-              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+              className="mt-2 sm:mt-0 bg-white w-full sm:max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[calc(100%-1rem)] flex flex-col"
               onClick={e => e.stopPropagation()}
               onSubmit={(e) => { e.preventDefault(); void confirmAddLine(); }}
             >
-              <div className="p-5 flex justify-between items-center text-white bg-indigo-900">
-                <h4 className="font-black text-sm uppercase tracking-widest">Nuevo producto</h4>
+              <div className="px-4 py-3 flex justify-between items-center text-white bg-indigo-900">
+                <h4 className="font-black text-xs uppercase tracking-widest">Nuevo producto</h4>
                 <button
                   type="button"
                   onClick={() => setNewLineModal(null)}
                   aria-label="Cerrar"
                   className="p-1.5 bg-white/20 hover:bg-white/30 rounded-xl transition-colors"
                 >
-                  <X size={18} />
+                  <X size={16} />
                 </button>
               </div>
 
-              <div className="p-5 space-y-5 overflow-y-auto">
+              <div className="p-4 space-y-3 overflow-y-auto">
                 <label className="block">
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nombre</span>
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Producto</span>
                   <input
                     type="text"
+                    name="producto-nuevo"
                     autoFocus
                     autoComplete="off"
+                    autoCorrect="off"
+                    enterKeyHint="next"
                     placeholder="Ej. Cerveza"
                     value={newLineModal.name}
                     onChange={(e) => setNewLineModal({ ...newLineModal, name: e.target.value })}
-                    className="mt-1.5 w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-indigo-400"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); newLinePriceRef.current?.focus(); }
+                    }}
+                    className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-bold text-gray-900 focus:outline-none focus:border-indigo-400"
                   />
                 </label>
 
-                <div className="flex items-end justify-between gap-4">
+                <div className="flex items-end justify-between gap-3">
                   <div>
-                    <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Unidades</span>
+                    <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Uds</span>
                     <UnitsStepper
                       value={newLineModal.quantity}
                       canIncrease
@@ -1343,41 +1350,39 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   </div>
                   <label className="block flex-1 min-w-0">
                     <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Precio unidad</span>
-                    <div className="mt-1.5 flex items-center bg-gray-50 border border-gray-200 rounded-xl px-3 focus-within:border-indigo-400">
+                    <div className="mt-1 flex items-center bg-gray-50 border border-gray-200 rounded-xl px-3 focus-within:border-indigo-400">
                       <input
+                        ref={newLinePriceRef}
                         type="text"
+                        name="precio-nuevo"
                         inputMode="decimal"
                         autoComplete="off"
+                        enterKeyHint="done"
                         placeholder="0,00"
                         value={newLineModal.price}
                         onChange={(e) => { if (!/^\d*([.,]\d{0,2})?$/.test(e.target.value)) return; setNewLineModal({ ...newLineModal, price: e.target.value.replace('.', ',') }); }}
-                        className="w-full min-w-0 bg-transparent py-3 text-sm font-bold text-gray-900 focus:outline-none"
+                        className="w-full min-w-0 bg-transparent py-2.5 text-sm font-bold text-gray-900 focus:outline-none"
                       />
                       <span className="text-gray-400 font-bold text-sm ml-1">€</span>
                     </div>
                   </label>
                 </div>
-
-                <div className="flex items-center justify-between rounded-2xl bg-indigo-50 px-4 py-3">
-                  <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Total</span>
-                  <span className="text-xl font-black text-indigo-900 tabular-nums">{formatMoney(lineTotal)}</span>
-                </div>
               </div>
 
-              <div className="p-5 pt-0 flex gap-3">
+              <div className="px-4 pb-4 flex gap-2">
                 <button
                   type="button"
                   onClick={() => setNewLineModal(null)}
-                  className="flex-1 py-3.5 rounded-2xl bg-gray-100 text-gray-600 text-[11px] font-black uppercase tracking-widest active-scale"
+                  className="flex-1 py-3 rounded-2xl bg-gray-100 text-gray-600 text-[11px] font-black uppercase tracking-widest active-scale"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  className="flex-[2] py-3.5 rounded-2xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 active-scale disabled:opacity-40"
+                  className="flex-[2] py-3 rounded-2xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 active-scale disabled:opacity-40"
                 >
-                  Añadir producto
+                  {canSubmit ? `Añadir · ${formatMoney(lineTotal)}` : 'Añadir producto'}
                 </button>
               </div>
             </form>
