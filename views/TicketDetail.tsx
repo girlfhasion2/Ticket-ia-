@@ -474,10 +474,6 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const isRepartoCompleto =
     pendingAssignments.length === 0 && Math.abs(totalRepartido - ticket.totalAmount) < 0.01;
 
-  const showSplitProgress = ticket.lines.length > 0 && ticket.participants.length > 0;
-  const splitPct = ticket.totalAmount > 0 ? Math.min(100, Math.round((totalRepartido / ticket.totalAmount) * 100)) : 0;
-  const isRepartoLineasCompleto = pendingAssignments.length === 0;
-
   const handleStatusChange = async (newStatus: 'borrador' | 'repartido' | 'pagado') => {
     const updated = { ...ticket, status: newStatus };
     await persistTicket(updated);
@@ -544,36 +540,12 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
           <button 
             key={tab}
             onClick={() => setActiveTab(tab as any)}
-            className={`relative flex-1 py-4 border-b-2 transition-all ${activeTab === tab ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400'} ${tab === 'split' && showSplitProgress ? 'border-b-0' : ''}`}
+            className={`flex-1 py-4 border-b-2 transition-all ${activeTab === tab ? 'border-indigo-600 text-indigo-600 bg-indigo-50/30' : 'border-transparent text-gray-400'}`}
           >
             {tab === 'info' && 'General'}
             {tab === 'items' && 'Productos'}
-            {tab === 'split' && (
-              <span className="inline-flex items-center justify-center gap-1.5">
-                Reparto
-                {showSplitProgress && (
-                  isRepartoLineasCompleto ? (
-                    <span className="inline-grid place-items-center min-w-[17px] h-[17px] rounded-full bg-green-600 text-white" aria-label="Todo repartido">
-                      <Check size={11} strokeWidth={3.5} />
-                    </span>
-                  ) : (
-                    <span className="inline-grid place-items-center min-w-[17px] h-[17px] px-1 rounded-full bg-amber-500 text-amber-950 text-[10px] tracking-normal" aria-label={`${pendingAssignments.length} productos pendientes`}>
-                      {pendingAssignments.length}
-                    </span>
-                  )
-                )}
-              </span>
-            )}
+            {tab === 'split' && 'Reparto'}
             {tab === 'summary' && 'Resumen'}
-            {tab === 'split' && showSplitProgress && (
-              <>
-                <span className="absolute left-0 right-0 bottom-0 h-[3px] bg-gray-200" />
-                <span
-                  className={`absolute left-0 bottom-0 h-[3px] transition-all duration-500 ${isRepartoLineasCompleto ? 'bg-green-600' : 'bg-indigo-600'}`}
-                  style={{ width: `${splitPct}%` }}
-                />
-              </>
-            )}
           </button>
         ))}
       </div>
@@ -895,6 +867,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                  <button onClick={() => setActiveTab('info')} className="bg-indigo-600 text-white font-black text-[10px] px-8 py-4 rounded-full mt-6 active-scale uppercase tracking-widest shadow-lg">Añadir Personas</button>
                </div>
              ) : (() => {
+               const totalRepartidoSplit = ticket.lines.reduce((sum, line) =>
+                 sum + line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units * line.unitPrice : s, 0), 0);
+               const pct = ticket.totalAmount > 0 ? Math.round((totalRepartidoSplit / ticket.totalAmount) * 100) : 0;
                const pendingCount = ticket.lines.filter(line => {
                  const assigned = line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units : s, 0);
                  return line.quantity - assigned > 0.001;
@@ -907,8 +882,25 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                  : ticket.lines;
                return (
                  <>
+                   {/* Barra de progreso */}
+                   <div className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 pt-3 pb-3 shadow-sm">
+                     <div className="flex justify-between items-center mb-1.5">
+                       <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Repartido</span>
+                       <span className="text-xs font-black text-gray-700 tabular-nums">
+                         {totalRepartidoSplit.toFixed(2)}€ <span className="text-gray-400 font-normal">/ {ticket.totalAmount.toFixed(2)}€</span>
+                       </span>
+                       <span className="text-xs font-black text-indigo-600">{pct}%</span>
+                     </div>
+                     <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                       <div
+                         className={`h-full rounded-full transition-all duration-500 ${pct >= 100 ? 'bg-green-500' : 'bg-indigo-500'}`}
+                         style={{ width: `${Math.min(pct, 100)}%` }}
+                       />
+                     </div>
+                   </div>
+
                    {/* Chips de filtro */}
-                   <div className="sticky top-0 z-10 -mx-4 -mt-4 flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
+                   <div className="flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
                      <button
                        onClick={() => setSplitFilter('all')}
                        className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'all' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
