@@ -127,6 +127,12 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [isPersonPickerOpen, setIsPersonPickerOpen] = useState(false);
   const [expandedShareLineId, setExpandedShareLineId] = useState<string | null>(null);
+  // Borrador de un grupo compartido nuevo (modo persona). No se guarda hasta pulsar "Crear grupo".
+  const [newGroupDraft, setNewGroupDraft] = useState<{
+    lineId: string;
+    units: number;
+    personIds: string[];
+  } | null>(null);
   const [retainedLineIds, setRetainedLineIds] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
@@ -536,6 +542,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     setSplitMode(mode);
     setIsPersonPickerOpen(false);
     setExpandedShareLineId(null);
+    setNewGroupDraft(null);
     setRetainedLineIds([]);
     if (mode === 'by-product' && splitFilter === 'person') {
       setSplitFilter('all');
@@ -556,6 +563,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     setSelectedPersonId(personId);
     setIsPersonPickerOpen(false);
     setRetainedLineIds([]);
+    setNewGroupDraft(null);
   };
 
   const addPersonWholeUnit = (lineId: string, personId: string) => {
@@ -636,30 +644,37 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     saveTicketAndSyncTotal({ ...ticket, lines });
   };
 
-  const addSharedGroupForPerson = (lineId: string, personId: string) => {
-    const targetLine = ticket.lines.find(l => l.id === lineId);
+  const createSharedGroupFromDraft = (personId: string) => {
+    if (!newGroupDraft) return;
+    const others = newGroupDraft.personIds.filter(id => id !== personId);
+    if (others.length === 0) return;
+    const targetLine = ticket.lines.find(l => l.id === newGroupDraft.lineId);
     if (!targetLine) return;
-    const consumedInGroups = targetLine.assignments.reduce((sum, a) => sum + a.units, 0);
-    const remainingToGroup = Math.max(0, targetLine.quantity - consumedInGroups);
-    if (remainingToGroup <= 0.001) return;
-
-    retainLineOnFilter(lineId);
-
-    const newUnits = remainingToGroup >= 1 ? 1 : Number(remainingToGroup.toFixed(2));
-    const lines = ticket.lines.map(l => {
-      if (l.id !== lineId) return l;
-      return {
-        ...l,
-        assignments: [
-          ...l.assignments,
-          { id: crypto.randomUUID(), units: newUnits, personIds: [personId] },
-        ],
-      };
-    });
+    const consumed = targetLine.assignments.reduce((sum, a) => sum + a.units, 0);
+    const remaining = Math.max(0, targetLine.quantity - consumed);
+    const units = Math.min(newGroupDraft.units, remaining);
+    if (units <= 0.001) return;
+    retainLineOnFilter(targetLine.id);
+    const lines = ticket.lines.map(l =>
+      l.id !== targetLine.id
+        ? l
+        : {
+            ...l,
+            assignments: [
+              ...l.assignments,
+              { id: crypto.randomUUID(), units, personIds: [personId, ...others] },
+            ],
+          }
+    );
     saveTicketAndSyncTotal({ ...ticket, lines });
+    setNewGroupDraft(null);
   };
 
-  const toggleAllParticipantsInAssignment = (lineId: string, assignmentId: string) => {
+  const toggleAllParticipantsInAssignment = (
+    lineId: string,
+    assignmentId: string,
+    keepPersonId?: string
+  ) => {
     const targetLine = ticket.lines.find(l => l.id === lineId);
     const targetAsgn = targetLine?.assignments.find(a => a.id === assignmentId);
     if (!targetAsgn) return;
@@ -668,7 +683,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     const allSelected =
       allIds.length > 0 && allIds.every(id => targetAsgn.personIds.includes(id));
     updateAssignment(lineId, assignmentId, {
-      personIds: allSelected ? [] : allIds,
+      personIds: allSelected
+        ? keepPersonId && targetAsgn.personIds.includes(keepPersonId)
+          ? [keepPersonId]
+          : []
+        : allIds,
     });
   };
 
@@ -1587,7 +1606,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                  </div>
                                </div>
 
-                               <div className="flex items-center justify-between gap-2 pt-0.5">
+                               <div className="flex items-end justify-between gap-2 pt-0.5">
+                                 <div className="flex flex-col gap-1">
+                                 <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest">
+                                   Enteras
+                                 </span>
                                  <div className="flex items-center gap-2">
                                    <button
                                      type="button"
@@ -1613,6 +1636,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                      +
                                    </button>
                                  </div>
+                                 </div>
 
                                  <button
                                    type="button"
@@ -1624,11 +1648,12 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                          })`
                                        : `Compartir ${line.description}`
                                    }
-                                   onClick={() =>
+                                   onClick={() => {
+                                     setNewGroupDraft(null);
                                      setExpandedShareLineId(prev =>
                                        prev === line.id ? null : line.id
-                                     )
-                                   }
+                                     );
+                                   }}
                                    className={`min-h-[44px] px-3.5 rounded-xl border text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 active-scale transition-colors shrink-0 ${
                                      isShareOpen
                                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
@@ -1652,97 +1677,220 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                </div>
                              </div>
 
-                             {/* Detalle plegable Compartir */}
-                             {isShareOpen && (
-                               <div className="p-4 space-y-3 bg-gray-50/40 border-t border-gray-100">
-                                 {line.assignments.length === 0 && (
-                                   <p className="text-xs font-bold text-gray-400 text-center py-2">
-                                     Aún no hay grupos creados para este producto.
+                             {/* Detalle plegable Compartir: solo grupos compartidos. Las enteras de la persona se gestionan con − / + */}
+                             {isShareOpen && (() => {
+                               const listedGroups = line.assignments.filter(
+                                 a => !(a.personIds.length === 1 && a.personIds[0] === activePerson.id)
+                               );
+                               const remainingToGroup = Math.max(
+                                 0,
+                                 line.quantity - totalUnitsInAllGroups
+                               );
+                               const draft =
+                                 newGroupDraft && newGroupDraft.lineId === line.id ? newGroupDraft : null;
+                               const draftOthers = draft
+                                 ? draft.personIds.filter(id => id !== activePerson.id)
+                                 : [];
+                               const draftAllOthersSelected =
+                                 ticket.participants.length > 1 &&
+                                 ticket.participants
+                                   .filter(p => p.id !== activePerson.id)
+                                   .every(p => draftOthers.includes(p.id));
+                               return (
+                                 <div className="p-4 space-y-3 bg-gray-50/40 border-t border-gray-100">
+                                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                                     Compartido con otras personas
                                    </p>
-                                 )}
-                                 {line.assignments.map(asgn => {
-                                   const groupParticipants = ticket.participants.filter(p =>
-                                     asgn.personIds.includes(p.id)
-                                   );
-                                   const allSelected =
-                                     ticket.participants.length > 0 &&
-                                     ticket.participants.every(p =>
+                                   {listedGroups.length === 0 && !draft && (
+                                     <p className="text-xs font-bold text-gray-500 text-center py-2">
+                                       Todavía no hay grupos compartidos en este producto.
+                                     </p>
+                                   )}
+                                   {listedGroups.map(asgn => {
+                                     const isMember = asgn.personIds.includes(activePerson.id);
+                                     const groupParticipants = ticket.participants.filter(p =>
                                        asgn.personIds.includes(p.id)
                                      );
-                                   const groupSummary =
-                                     groupParticipants.length === 0
-                                       ? 'Sin personas asignadas'
-                                       : groupParticipants.length === 1
-                                       ? `Solo ${groupParticipants[0].name}`
-                                       : `Compartido: ${groupParticipants
-                                           .map(p => p.name)
-                                           .join(', ')}`;
-                                   const perPersonGroupAmount =
-                                     groupParticipants.length > 0
-                                       ? (asgn.units * line.unitPrice) / groupParticipants.length
-                                       : 0;
+                                     const allSelected =
+                                       ticket.participants.length > 0 &&
+                                       ticket.participants.every(p =>
+                                         asgn.personIds.includes(p.id)
+                                       );
+                                     const groupSummary =
+                                       groupParticipants.length === 0
+                                         ? 'Sin personas asignadas'
+                                         : groupParticipants.length === 1
+                                         ? `Solo ${groupParticipants[0].name}`
+                                         : `Compartido: ${groupParticipants
+                                             .map(p => p.name)
+                                             .join(', ')}`;
+                                     const perPersonGroupAmount =
+                                       groupParticipants.length > 0
+                                         ? (asgn.units * line.unitPrice) / groupParticipants.length
+                                         : 0;
 
-                                   return (
-                                     <div
-                                       key={asgn.id}
-                                       className={`p-4 border rounded-2xl shadow-sm space-y-3 ${
-                                         asgn.personIds.length > 0
-                                           ? 'bg-white border-gray-100'
-                                           : 'bg-amber-50/50 border-amber-100'
-                                       }`}
-                                     >
-                                       <div className="flex items-center justify-between gap-2">
-                                         <div className="flex flex-col">
-                                           <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter mb-1">
-                                             Unidades
-                                           </span>
-                                           <UnitsStepper
-                                             value={asgn.units}
-                                             canIncrease={totalUnitsInAllGroups < line.quantity}
-                                             onChange={v => {
+                                     return (
+                                       <div
+                                         key={asgn.id}
+                                         className={`p-4 border rounded-2xl shadow-sm space-y-3 ${
+                                           asgn.personIds.length > 0
+                                             ? 'bg-white border-gray-100'
+                                             : 'bg-amber-50/50 border-amber-100'
+                                         }`}
+                                       >
+                                         <div className="flex items-center justify-between gap-2">
+                                           <div className="flex flex-col">
+                                             <span className="text-[9px] font-black text-gray-500 uppercase tracking-tighter mb-1">
+                                               Unidades
+                                             </span>
+                                             <UnitsStepper
+                                               value={asgn.units}
+                                               canIncrease={totalUnitsInAllGroups < line.quantity}
+                                               onChange={v => {
+                                                 retainLineOnFilter(line.id);
+                                                 updateAssignment(line.id, asgn.id, { units: v });
+                                               }}
+                                             />
+                                           </div>
+                                           <button
+                                             type="button"
+                                             aria-label="Eliminar grupo"
+                                             onClick={() => {
                                                retainLineOnFilter(line.id);
-                                               updateAssignment(line.id, asgn.id, { units: v });
+                                               deleteAssignment(line.id, asgn.id);
                                              }}
-                                           />
+                                             className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-red-500 active-scale transition-colors bg-gray-100/50 rounded-xl shrink-0"
+                                           >
+                                             <Trash2 size={18} />
+                                           </button>
                                          </div>
-                                         <button
-                                           type="button"
-                                           aria-label="Eliminar grupo"
-                                           onClick={() => {
-                                             retainLineOnFilter(line.id);
-                                             deleteAssignment(line.id, asgn.id);
-                                           }}
-                                           className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-red-500 active-scale transition-colors bg-gray-100/50 rounded-xl shrink-0"
-                                         >
-                                           <Trash2 size={18} />
-                                         </button>
-                                       </div>
 
-                                       <div className="flex items-center justify-between gap-2 text-xs">
-                                         <span
-                                           className={`font-bold truncate ${
-                                             groupParticipants.length === 0
-                                               ? 'text-amber-700'
-                                               : 'text-gray-600'
-                                           }`}
-                                         >
-                                           {groupSummary}
-                                         </span>
-                                         {groupParticipants.length > 0 && (
-                                           <span className="font-black text-indigo-600 tabular-nums shrink-0">
-                                             {formatMoney(perPersonGroupAmount)}/pers.
+                                         <div className="flex items-center justify-between gap-2 text-xs">
+                                           <span
+                                             className={`font-bold truncate ${
+                                               groupParticipants.length === 0
+                                                 ? 'text-amber-700'
+                                                 : 'text-gray-600'
+                                             }`}
+                                           >
+                                             {groupSummary}
                                            </span>
+                                           {groupParticipants.length > 0 && (
+                                             <span className="font-black text-indigo-600 tabular-nums shrink-0">
+                                               {formatMoney(perPersonGroupAmount)}/pers.
+                                             </span>
+                                           )}
+                                         </div>
+
+                                         <div className="flex flex-wrap gap-2">
+                                           <button
+                                             type="button"
+                                             onClick={() =>
+                                               toggleAllParticipantsInAssignment(
+                                                 line.id,
+                                                 asgn.id,
+                                                 isMember ? activePerson.id : undefined
+                                               )
+                                             }
+                                             className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
+                                               allSelected
+                                                 ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
+                                                 : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                                             }`}
+                                           >
+                                             Todos
+                                           </button>
+                                           {ticket.participants.map(p => {
+                                             const isSelected = asgn.personIds.includes(p.id);
+                                             const isSelf = p.id === activePerson.id;
+                                             if (isSelf && isSelected) {
+                                               return (
+                                                 <button
+                                                   key={p.id}
+                                                   type="button"
+                                                   disabled
+                                                   aria-label={`${p.name}, incluida en este grupo`}
+                                                   className="min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border bg-indigo-600 border-indigo-600 text-white shadow-md cursor-default"
+                                                 >
+                                                   {p.name}
+                                                 </button>
+                                               );
+                                             }
+                                             return (
+                                               <button
+                                                 key={p.id}
+                                                 type="button"
+                                                 onClick={() => {
+                                                   retainLineOnFilter(line.id);
+                                                   const newPids = isSelected
+                                                     ? asgn.personIds.filter(id => id !== p.id)
+                                                     : [...asgn.personIds, p.id];
+                                                   updateAssignment(line.id, asgn.id, {
+                                                     personIds: newPids,
+                                                   });
+                                                 }}
+                                                 className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
+                                                   isSelected
+                                                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
+                                                     : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                                                 }`}
+                                               >
+                                                 {p.name}
+                                               </button>
+                                             );
+                                           })}
+                                         </div>
+
+                                         {isMember && (
+                                           <div className="flex justify-end">
+                                             <button
+                                               type="button"
+                                               onClick={() => {
+                                                 retainLineOnFilter(line.id);
+                                                 updateAssignment(line.id, asgn.id, {
+                                                   personIds: asgn.personIds.filter(
+                                                     id => id !== activePerson.id
+                                                   ),
+                                                 });
+                                               }}
+                                               className="min-h-[44px] px-2 text-[10px] font-black text-gray-500 hover:text-red-500 uppercase tracking-widest underline underline-offset-2 active-scale"
+                                             >
+                                               Salir del grupo
+                                             </button>
+                                           </div>
                                          )}
                                        </div>
+                                     );
+                                   })}
 
+                                   {draft && (
+                                     <div className="p-4 border border-indigo-200 rounded-2xl shadow-sm space-y-3 bg-white">
+                                       <span className="block text-[10px] font-black text-indigo-600 uppercase tracking-widest">
+                                         Nuevo reparto compartido
+                                       </span>
+                                       <div className="flex flex-col">
+                                         <span className="text-[9px] font-black text-gray-500 uppercase tracking-tighter mb-1">
+                                           Unidades a compartir
+                                         </span>
+                                         <UnitsStepper
+                                           value={draft.units}
+                                           canIncrease={draft.units < remainingToGroup - 0.001}
+                                           onChange={v => setNewGroupDraft({ ...draft, units: v })}
+                                         />
+                                       </div>
                                        <div className="flex flex-wrap gap-2">
                                          <button
                                            type="button"
                                            onClick={() =>
-                                             toggleAllParticipantsInAssignment(line.id, asgn.id)
+                                             setNewGroupDraft({
+                                               ...draft,
+                                               personIds: draftAllOthersSelected
+                                                 ? [activePerson.id]
+                                                 : ticket.participants.map(p => p.id),
+                                             })
                                            }
                                            className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
-                                             allSelected
+                                             draftAllOthersSelected
                                                ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
                                                : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
                                            }`}
@@ -1750,20 +1898,33 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                            Todos
                                          </button>
                                          {ticket.participants.map(p => {
-                                           const isSelected = asgn.personIds.includes(p.id);
+                                           const isSelf = p.id === activePerson.id;
+                                           const isSelected = isSelf || draft.personIds.includes(p.id);
+                                           if (isSelf) {
+                                             return (
+                                               <button
+                                                 key={p.id}
+                                                 type="button"
+                                                 disabled
+                                                 aria-label={`${p.name}, incluida en este grupo`}
+                                                 className="min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border bg-indigo-600 border-indigo-600 text-white shadow-md cursor-default"
+                                               >
+                                                 {p.name}
+                                               </button>
+                                             );
+                                           }
                                            return (
                                              <button
                                                key={p.id}
                                                type="button"
-                                               onClick={() => {
-                                                 retainLineOnFilter(line.id);
-                                                 const newPids = isSelected
-                                                   ? asgn.personIds.filter(id => id !== p.id)
-                                                   : [...asgn.personIds, p.id];
-                                                 updateAssignment(line.id, asgn.id, {
-                                                   personIds: newPids,
-                                                 });
-                                               }}
+                                               onClick={() =>
+                                                 setNewGroupDraft({
+                                                   ...draft,
+                                                   personIds: isSelected
+                                                     ? draft.personIds.filter(id => id !== p.id)
+                                                     : [...draft.personIds, p.id],
+                                                 })
+                                               }
                                                className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
                                                  isSelected
                                                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
@@ -1775,23 +1936,62 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                            );
                                          })}
                                        </div>
+                                       <div className="flex items-center justify-between gap-2 text-xs">
+                                         <span className="font-bold text-gray-600">
+                                           {draftOthers.length === 0
+                                             ? 'Elige con quién lo compartes'
+                                             : `Entre ${draftOthers.length + 1} personas`}
+                                         </span>
+                                         {draftOthers.length > 0 && (
+                                           <span className="font-black text-indigo-600 tabular-nums shrink-0">
+                                             {formatMoney(
+                                               (draft.units * line.unitPrice) / (draftOthers.length + 1)
+                                             )}
+                                             /pers.
+                                           </span>
+                                         )}
+                                       </div>
+                                       <div className="flex gap-2">
+                                         <button
+                                           type="button"
+                                           onClick={() => setNewGroupDraft(null)}
+                                           className="min-h-[44px] flex-1 rounded-xl border border-gray-200 bg-white text-[11px] font-black text-gray-600 uppercase tracking-widest active-scale"
+                                         >
+                                           Cancelar
+                                         </button>
+                                         <button
+                                           type="button"
+                                           disabled={draftOthers.length === 0}
+                                           onClick={() => createSharedGroupFromDraft(activePerson.id)}
+                                           className="min-h-[44px] flex-1 rounded-xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest active-scale disabled:opacity-40"
+                                         >
+                                           Crear grupo
+                                         </button>
+                                       </div>
                                      </div>
-                                   );
-                                 })}
+                                   )}
 
-                                 {totalUnitsInAllGroups < line.quantity - 0.001 && (
-                                   <button
-                                     type="button"
-                                     onClick={() =>
-                                       addSharedGroupForPerson(line.id, activePerson.id)
-                                     }
-                                     className="w-full min-h-[44px] border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-3 px-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
-                                   >
-                                     + NUEVO GRUPO DE REPARTO
-                                   </button>
-                                 )}
-                               </div>
-                             )}
+                                   {!draft && remainingToGroup > 0.001 && (
+                                     <button
+                                       type="button"
+                                       onClick={() =>
+                                         setNewGroupDraft({
+                                           lineId: line.id,
+                                           units:
+                                             remainingToGroup >= 1
+                                               ? 1
+                                               : Number(remainingToGroup.toFixed(2)),
+                                           personIds: [activePerson.id],
+                                         })
+                                       }
+                                       className="w-full min-h-[44px] border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-3 px-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
+                                     >
+                                       + NUEVO GRUPO DE REPARTO
+                                     </button>
+                                   )}
+                                 </div>
+                               );
+                             })()}
                            </div>
                          );
                        })}
