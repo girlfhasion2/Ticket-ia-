@@ -76,6 +76,7 @@
         html.dark .bg-amber-100, html.dark .bg-orange-100 { background-color: rgba(245,158,11,.2); }
         html.dark .text-amber-600, html.dark .text-amber-700, html.dark .text-orange-600 { color: #fbbf24; }
         html.dark .text-amber-800, html.dark .text-amber-900 { color: #fcd34d; }
+        html.dark .bg-amber-200 { background-color: #fcd34d; }
         html.dark .bg-amber-400 { background-color: #fbbf24; }
         html.dark .text-amber-950 { color: #451a03; }
         html.dark .border-amber-100, html.dark .border-amber-200 { border-color: rgba(245,158,11,.3); }
@@ -92,13 +93,37 @@
         html.dark .hover\:bg-red-100:hover { background-color: rgba(239,68,68,.28); }
         html.dark .hover\:bg-orange-50:hover, html.dark .hover\:bg-green-50:hover { background-color: rgba(245,158,11,.18); }
         html.dark .hover\:border-indigo-200:hover, html.dark .hover\:border-indigo-300:hover, html.dark .focus\:border-indigo-100:focus, html.dark .focus\:border-indigo-200:focus { border-color: rgba(129,140,248,.5); }
-        html.dark .hover\:text-gray-700:hover { color: #d1d5db; }
-        html.dark .hover\:text-indigo-600:hover, html.dark .hover\:text-indigo-500:hover, html.dark .hover\:text-indigo-800:hover, html.dark .group:hover .group-hover\:text-indigo-600 { color: #a5b4fc; }
+        html.dark .focus-within\:border-indigo-400:focus-within { border-color: rgba(129,140,248,.65); }
+        html.dark .focus-within\:ring-indigo-100:focus-within { --tw-ring-color: rgba(129,140,248,.22); }
+        html.dark .hover\:text-gray-600:hover, html.dark .hover\:text-gray-700:hover { color: #d1d5db; }
+        html.dark .hover\:text-indigo-600:hover, html.dark .hover\:text-indigo-500:hover, html.dark .hover\:text-indigo-700:hover, html.dark .hover\:text-indigo-800:hover, html.dark .group:hover .group-hover\:text-indigo-600 { color: #a5b4fc; }
         html.dark .group:hover .group-hover\:text-gray-600 { color: #d1d5db; }
         html.dark .hover\:text-red-500:hover, html.dark .hover\:text-red-600:hover, html.dark .hover\:text-red-700:hover, html.dark .group:hover .group-hover\:text-red-600, html.dark .group:hover .group-hover\:text-red-700 { color: #fca5a5; }
         /* Mobile-friendly active states */
         .active-scale:active {
             transform: scale(0.98);
+        }
+        @keyframes searchBarEnter {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .search-bar-enter {
+            animation: searchBarEnter 180ms ease-out both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .search-bar-enter {
+                animation: none;
+            }
+        }
+        input[type="search"]::-webkit-search-cancel-button {
+            -webkit-appearance: none;
+            appearance: none;
         }
     </style>
 </head>

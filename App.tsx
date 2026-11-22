@@ -34,6 +34,7 @@ const App: React.FC = () => {
     field: 'date',
     direction: 'desc',
   });
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const onHashChange = () => {
@@ -84,6 +85,7 @@ const App: React.FC = () => {
       setDraftTicket(undefined);
       setIsListSelectionMode(false);
       setSortConfig({ field: 'date', direction: 'desc' });
+      setSearchQuery('');
     }
   }, [user]);
 
@@ -155,6 +157,8 @@ const App: React.FC = () => {
             onSelectionModeChange={setIsListSelectionMode}
             sortConfig={sortConfig}
             onSortChange={setSortConfig}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
           />
         );
       case 'detail':
@@ -179,6 +183,8 @@ const App: React.FC = () => {
             onSelectionModeChange={setIsListSelectionMode}
             sortConfig={sortConfig}
             onSortChange={setSortConfig}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
           />
         );
     }

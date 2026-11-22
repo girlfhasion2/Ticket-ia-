@@ -20,6 +20,9 @@ import {
   CreditCard,
   RotateCcw,
   Share2,
+  Search,
+  User,
+  ShoppingBag,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -30,11 +33,154 @@ interface TicketListProps {
   onSelectionModeChange?: (active: boolean) => void;
   sortConfig?: TicketSortConfig;
   onSortChange?: (sort: TicketSortConfig) => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
 
 const DEFAULT_SORT: TicketSortConfig = { field: 'date', direction: 'desc' };
 const LONG_PRESS_MS = 450;
 const MOVE_THRESHOLD_PX = 10;
+
+function normalizeText(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function normalizeWithIndexMap(original: string): {
+  norm: string;
+  origStart: number[];
+  origEnd: number[];
+} {
+  let norm = '';
+  const origStart: number[] = [];
+  const origEnd: number[] = [];
+
+  let i = 0;
+  while (i < original.length) {
+    const code = original.codePointAt(i)!;
+    const charLen = code > 0xffff ? 2 : 1;
+    const ch = original.slice(i, i + charLen);
+    const stripped = ch
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    for (let k = 0; k < stripped.length; k++) {
+      norm += stripped[k];
+      origStart.push(i);
+      origEnd.push(i + charLen);
+    }
+    if (stripped.length === 0 && /[\u0300-\u036f]/.test(ch) && origEnd.length > 0) {
+      origEnd[origEnd.length - 1] = i + charLen;
+    }
+    i += charLen;
+  }
+
+  return { norm, origStart, origEnd };
+}
+
+function getMatchRanges(original: string, tokens: string[]): [number, number][] {
+  if (!original || tokens.length === 0) return [];
+  const { norm, origStart, origEnd } = normalizeWithIndexMap(original);
+  if (!norm) return [];
+
+  const ranges: [number, number][] = [];
+  for (const token of tokens) {
+    if (!token) continue;
+    let from = 0;
+    while (from <= norm.length - token.length) {
+      const idx = norm.indexOf(token, from);
+      if (idx === -1) break;
+      const start = origStart[idx];
+      const end = origEnd[idx + token.length - 1];
+      if (start !== undefined && end !== undefined && end > start) {
+        ranges.push([start, end]);
+      }
+      from = idx + token.length;
+    }
+  }
+
+  if (ranges.length === 0) return [];
+
+  ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged: [number, number][] = [ranges[0]];
+  for (let i = 1; i < ranges.length; i++) {
+    const prev = merged[merged.length - 1];
+    const curr = ranges[i];
+    if (curr[0] <= prev[1]) {
+      prev[1] = Math.max(prev[1], curr[1]);
+    } else {
+      merged.push(curr);
+    }
+  }
+  return merged;
+}
+
+function highlightText(text: string, tokens: string[]): React.ReactNode {
+  if (!text || tokens.length === 0) return text;
+  const ranges = getMatchRanges(text, tokens);
+  if (ranges.length === 0) return text;
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach(([start, end], idx) => {
+    if (start > cursor) {
+      parts.push(text.slice(cursor, start));
+    }
+    parts.push(
+      <mark key={`${start}-${end}-${idx}`} className="bg-amber-200 text-amber-950 rounded px-0.5">
+        {text.slice(start, end)}
+      </mark>
+    );
+    cursor = end;
+  });
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+  return parts;
+}
+
+interface MatchPill {
+  key: string;
+  type: 'item' | 'person';
+  label: string;
+}
+
+function getMatchedPills(ticket: Ticket, tokens: string[]): MatchPill[] {
+  if (tokens.length === 0) return [];
+  const pills: MatchPill[] = [];
+  const seen = new Set<string>();
+
+  for (const line of ticket.lines) {
+    const label = line.description?.trim();
+    if (!label) continue;
+    const norm = normalizeText(label);
+    if (tokens.some((t) => norm.includes(t))) {
+      const dedupeKey = `item:${norm}`;
+      if (!seen.has(dedupeKey)) {
+        seen.add(dedupeKey);
+        pills.push({ key: `item-${line.id}`, type: 'item', label });
+      }
+    }
+  }
+
+  for (const person of ticket.participants) {
+    const label = person.name?.trim();
+    if (!label) continue;
+    const norm = normalizeText(label);
+    if (tokens.some((t) => norm.includes(t))) {
+      const dedupeKey = `person:${norm}`;
+      if (!seen.has(dedupeKey)) {
+        seen.add(dedupeKey);
+        pills.push({ key: `person-${person.id}`, type: 'person', label });
+      }
+    }
+  }
+
+  return pills;
+}
 
 const TicketList: React.FC<TicketListProps> = ({
   onSelectTicket,
@@ -42,6 +188,8 @@ const TicketList: React.FC<TicketListProps> = ({
   onSelectionModeChange,
   sortConfig: controlledSortConfig,
   onSortChange,
+  searchQuery: controlledSearchQuery,
+  onSearchChange,
 }) => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -51,6 +199,13 @@ const TicketList: React.FC<TicketListProps> = ({
   const [localSortConfig, setLocalSortConfig] = useState<TicketSortConfig>(DEFAULT_SORT);
   const sortConfig = controlledSortConfig ?? localSortConfig;
   const setSortConfig = onSortChange ?? setLocalSortConfig;
+  const [localSearchQuery, setLocalSearchQuery] = useState('');
+  const searchQuery = controlledSearchQuery ?? localSearchQuery;
+  const setSearchQuery = onSearchChange ?? setLocalSearchQuery;
+  const [isSearchOpen, setIsSearchOpen] = useState(() =>
+    Boolean((controlledSearchQuery ?? '').trim())
+  );
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -114,6 +269,7 @@ const TicketList: React.FC<TicketListProps> = ({
   }, []);
 
   const enterSelectionMode = (initialId?: string) => {
+    setIsSearchOpen(false);
     setSelectionMode(true);
     if (initialId) {
       setSelectedIds((prev) => (prev.includes(initialId) ? prev : [...prev, initialId]));
@@ -123,6 +279,11 @@ const TicketList: React.FC<TicketListProps> = ({
   const exitSelectionMode = () => {
     setSelectionMode(false);
     setSelectedIds([]);
+  };
+
+  const closeSearch = () => {
+    setSearchQuery('');
+    setIsSearchOpen(false);
   };
 
   const toggleTicketSelection = (id: string) => {
@@ -139,18 +300,52 @@ const TicketList: React.FC<TicketListProps> = ({
     );
   };
 
-  const filteredTickets =
-    selectedCategoryIds.length === 0
-      ? tickets
-      : tickets.filter(
-          (t) => Boolean(t.categoryId) && selectedCategoryIds.includes(t.categoryId!)
-        );
+  const getMerchantDisplayName = (ticket: Ticket): string =>
+    ticket.merchant &&
+    ticket.merchant.trim() &&
+    ticket.merchant.trim().toLowerCase() !== 'null'
+      ? ticket.merchant.trim()
+      : 'Sin nombre';
+
+  const trimmedSearch = searchQuery.trim();
+  const searchTokens = trimmedSearch
+    ? normalizeText(trimmedSearch).split(/\s+/).filter(Boolean)
+    : [];
+  const hasSearch = searchTokens.length > 0;
+
+  const ticketMatchesSearch = (ticket: Ticket): boolean => {
+    if (!hasSearch) return true;
+    const merchantNorm = normalizeText(getMerchantDisplayName(ticket));
+    const lineNorms = ticket.lines.map((l) => normalizeText(l.description || ''));
+    const participantNorms = ticket.participants.map((p) => normalizeText(p.name || ''));
+
+    return searchTokens.every(
+      (token) =>
+        merchantNorm.includes(token) ||
+        lineNorms.some((desc) => desc.includes(token)) ||
+        participantNorms.some((name) => name.includes(token))
+    );
+  };
+
+  const filteredTickets = tickets.filter((t) => {
+    const matchesCategory =
+      selectedCategoryIds.length === 0 ||
+      (Boolean(t.categoryId) && selectedCategoryIds.includes(t.categoryId!));
+    if (!matchesCategory) return false;
+    return ticketMatchesSearch(t);
+  });
+
+  const allVisibleSelected =
+    filteredTickets.length > 0 &&
+    filteredTickets.every((t) => selectedIds.includes(t.id));
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredTickets.length) {
-      setSelectedIds([]);
+    const visibleIds = filteredTickets.map((t) => t.id);
+    if (allVisibleSelected) {
+      const visibleSet = new Set(visibleIds);
+      setSelectedIds((prev) => prev.filter((id) => !visibleSet.has(id)));
     } else {
-      setSelectedIds(filteredTickets.map((t) => t.id));
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
     }
   };
 
@@ -281,13 +476,6 @@ const TicketList: React.FC<TicketListProps> = ({
     );
   };
 
-  const getMerchantDisplayName = (ticket: Ticket): string =>
-    ticket.merchant &&
-    ticket.merchant.trim() &&
-    ticket.merchant.trim().toLowerCase() !== 'null'
-      ? ticket.merchant.trim()
-      : 'Sin nombre';
-
   const sortedFilteredTickets = [...filteredTickets].sort((a, b) => {
     if (sortConfig.field === 'name') {
       const cmp = getMerchantDisplayName(a).localeCompare(
@@ -340,31 +528,217 @@ const TicketList: React.FC<TicketListProps> = ({
 
   const deleteCount = pendingDeleteIds?.length || 0;
 
+  const renderTicketCard = (ticket: Ticket, datePattern: string) => {
+    const isSelected = selectedIds.includes(ticket.id);
+    const merchantName = getMerchantDisplayName(ticket);
+    const matchedPills = hasSearch ? getMatchedPills(ticket, searchTokens) : [];
+    const visiblePills = matchedPills.slice(0, 3);
+    const extraPillsCount = matchedPills.length - visiblePills.length;
+
+    return (
+      <div
+        key={ticket.id}
+        onPointerDown={(e) => handleCardPointerDown(e, ticket.id)}
+        onPointerMove={handleCardPointerMove}
+        onPointerUp={clearLongPressTimer}
+        onPointerCancel={clearLongPressTimer}
+        onContextMenu={(e) => {
+          if (selectionMode) e.preventDefault();
+        }}
+        onClick={() => handleCardClick(ticket.id)}
+        className={`p-4 rounded-xl shadow-sm border transition-colors cursor-pointer relative select-none ${
+          selectionMode && isSelected
+            ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-100'
+            : 'bg-white border-gray-100 active:bg-gray-50'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+            {selectionMode && (
+              <div
+                className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${
+                  isSelected
+                    ? 'bg-indigo-600 border-indigo-600 text-white'
+                    : 'bg-white border-gray-300'
+                }`}
+                aria-checked={isSelected}
+                role="checkbox"
+              >
+                {isSelected && <Check size={14} strokeWidth={3} />}
+              </div>
+            )}
+
+            <div className="w-12 h-12 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 shrink-0">
+              <Store size={24} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-semibold text-gray-900 truncate">
+                {hasSearch ? highlightText(merchantName, searchTokens) : merchantName}
+              </h3>
+              <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar size={12} />
+                  <span>
+                    {format(parseISO(ticket.date), datePattern, { locale: es })}
+                  </span>
+                </span>
+                {ticket.categoryId && categoryMap.has(ticket.categoryId) && (
+                  <span className="text-indigo-600 font-semibold">
+                    · {categoryMap.get(ticket.categoryId)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
+            <div className="text-right">
+              <span className="text-lg font-bold text-gray-900 tabular-nums block">
+                {ticket.totalAmount.toLocaleString('es-ES', {
+                  style: 'currency',
+                  currency: 'EUR',
+                })}
+              </span>
+              {getStatusBadge(ticket.status)}
+            </div>
+            {!selectionMode && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label={`Opciones de ${merchantName}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearLongPressTimer();
+                    setOpenMenuId(openMenuId === ticket.id ? null : ticket.id);
+                  }}
+                  className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg active-scale transition-colors"
+                >
+                  <MoreVertical size={18} />
+                </button>
+                {openMenuId === ticket.id && (
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[190px] py-2 overflow-hidden"
+                  >
+                    {(!ticket.status || ticket.status === 'borrador') && computeRepartoCompleto(ticket) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-orange-600 hover:bg-orange-50 transition-colors"
+                      >
+                        <CreditCard size={16} />
+                        Marcar repartido
+                      </button>
+                    )}
+                    {ticket.status === 'repartido' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleShare(ticket); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        >
+                          <Share2 size={16} />
+                          Compartir resumen
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
+                        >
+                          <Check size={16} />
+                          Marcar como pagado
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                        >
+                          <RotateCcw size={16} />
+                          Reabrir ticket
+                        </button>
+                      </>
+                    )}
+                    {ticket.status === 'pagado' && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
+                      >
+                        <RotateCcw size={16} />
+                        Reabrir ticket
+                      </button>
+                    )}
+                    <div className="border-t border-gray-100 my-1" />
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); handleSingleTrashClick(e, ticket.id); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 size={16} />
+                      Eliminar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {matchedPills.length > 0 && (
+          <div className="mt-3 pt-2.5 border-t border-dashed border-gray-200 flex items-center gap-1.5 flex-wrap min-w-0">
+            <span className="text-[10px] font-black uppercase tracking-wider text-gray-400 mr-0.5 shrink-0">
+              Coincide
+            </span>
+            {visiblePills.map((pill) => (
+              <span
+                key={pill.key}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 text-[11px] font-semibold max-w-full min-w-0"
+              >
+                {pill.type === 'person' ? (
+                  <User size={11} className="shrink-0" />
+                ) : (
+                  <ShoppingBag size={11} className="shrink-0" />
+                )}
+                <span className="truncate">{highlightText(pill.label, searchTokens)}</span>
+              </span>
+            ))}
+            {extraPillsCount > 0 && (
+              <span className="text-[11px] font-bold text-indigo-600 px-1 shrink-0">
+                +{extraPillsCount} más
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="p-4 bg-gray-50 min-h-full" onClick={() => openMenuId && setOpenMenuId(null)}>
-      <header className="mb-4 flex items-center justify-between gap-3">
+      <header className="mb-4 min-h-[52px] flex items-center justify-between gap-3">
         {selectionMode ? (
           <>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl font-bold text-gray-900 truncate">
                 {selectedIds.length === 0
                   ? 'Selecciona tickets'
                   : `${selectedIds.length} ${
                       selectedIds.length === 1 ? 'seleccionado' : 'seleccionados'
                     }`}
               </h1>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 truncate">
                 Toca los tickets que quieras eliminar
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {filteredTickets.length > 0 && (
                 <button
                   type="button"
                   onClick={toggleSelectAll}
                   className="px-3 py-2 rounded-xl text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active-scale transition-colors"
                 >
-                  {selectedIds.length === filteredTickets.length ? 'Ninguno' : 'Todos'}
+                  {allVisibleSelected ? 'Ninguno' : 'Todos'}
                 </button>
               )}
               <button
@@ -377,22 +751,81 @@ const TicketList: React.FC<TicketListProps> = ({
               </button>
             </div>
           </>
+        ) : isSearchOpen ? (
+          <div className="flex items-center gap-2.5 w-full search-bar-enter">
+            <div className="flex-1 min-w-0 h-[46px] rounded-2xl bg-white border border-indigo-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 flex items-center pl-3.5 pr-1.5 gap-2 shadow-sm transition-all">
+              <Search size={18} className="text-indigo-500 shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeSearch();
+                  }
+                }}
+                placeholder="Comercio, producto o persona"
+                autoFocus
+                enterKeyHint="search"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-label="Buscar tickets por comercio, producto o persona"
+                className="flex-1 min-w-0 bg-transparent text-sm font-medium text-gray-900 placeholder:text-gray-400 focus:outline-none"
+              />
+              {searchQuery.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    searchInputRef.current?.focus();
+                  }}
+                  aria-label="Limpiar búsqueda"
+                  className="w-8 h-8 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center shrink-0 active-scale transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={closeSearch}
+              className="text-sm font-bold text-indigo-600 hover:text-indigo-700 px-1.5 py-2 shrink-0 active-scale transition-colors"
+            >
+              Cerrar
+            </button>
+          </div>
         ) : (
           <>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Mis Tickets</h1>
-              <p className="text-sm text-gray-500">Gestiona y reparte tus gastos</p>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-2xl font-bold text-gray-900 truncate">Mis Tickets</h1>
+              <p className="text-sm text-gray-500 truncate">Gestiona y reparte tus gastos</p>
             </div>
             {tickets.length > 0 && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsSearchOpen(true)}
+                  aria-label="Buscar tickets"
+                  className="relative p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center justify-center shadow-sm"
+                >
+                  <Search size={18} />
+                  {hasSearch && (
+                    <span
+                      aria-label="Búsqueda activa"
+                      className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-purple-600 ring-2 ring-gray-50"
+                    />
+                  )}
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowSortModal(true)}
                   aria-label="Ordenar tickets"
-                  className="relative p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center gap-1.5 shadow-sm"
+                  className="relative p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center justify-center shadow-sm"
                 >
                   <ArrowUpDown size={18} />
-                  <span className="text-xs font-bold">Ordenar</span>
                   {!isDefaultSort && (
                     <span
                       aria-label="Orden personalizado activo"
@@ -404,10 +837,9 @@ const TicketList: React.FC<TicketListProps> = ({
                   type="button"
                   onClick={() => enterSelectionMode()}
                   aria-label="Seleccionar tickets"
-                  className="p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center gap-1.5 shadow-sm"
+                  className="p-2.5 rounded-xl bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:border-indigo-200 active-scale transition-colors flex items-center justify-center shadow-sm"
                 >
                   <CheckSquare size={18} />
-                  <span className="text-xs font-bold">Seleccionar</span>
                 </button>
               </div>
             )}
@@ -479,6 +911,22 @@ const TicketList: React.FC<TicketListProps> = ({
         </div>
       )}
 
+      {!isLoading && hasSearch && filteredTickets.length > 0 && (
+        <div className="mb-3 px-1 flex items-center justify-between gap-2 text-xs font-semibold text-indigo-600">
+          <span className="truncate min-w-0">
+            {filteredTickets.length}{' '}
+            {filteredTickets.length === 1 ? 'ticket' : 'tickets'} para «{trimmedSearch}»
+          </span>
+          <button
+            type="button"
+            onClick={closeSearch}
+            className="underline font-bold shrink-0 hover:text-indigo-700 active-scale"
+          >
+            Quitar búsqueda
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="text-center py-20 bg-white rounded-2xl shadow-sm border border-gray-100">
           <RefreshCw size={32} className="mx-auto text-indigo-600 animate-spin mb-3" />
@@ -487,7 +935,24 @@ const TicketList: React.FC<TicketListProps> = ({
           </p>
         </div>
       ) : Object.keys(groupedTickets).length === 0 ? (
-        selectedCategoryIds.length > 0 && tickets.length > 0 ? (
+        hasSearch ? (
+          <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300 px-4">
+            <Search size={40} className="mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-800 font-bold text-sm break-words">
+              Sin resultados para «{trimmedSearch}»
+            </p>
+            <p className="text-gray-500 text-xs mt-1.5">
+              Prueba con el nombre de un producto o de una persona.
+            </p>
+            <button
+              type="button"
+              onClick={closeSearch}
+              className="mt-4 text-indigo-600 text-sm font-semibold underline active-scale"
+            >
+              Quitar búsqueda
+            </button>
+          </div>
+        ) : selectedCategoryIds.length > 0 && tickets.length > 0 ? (
           <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-dashed border-gray-300 px-4">
             <Tag size={40} className="mx-auto text-gray-300 mb-3" />
             <p className="text-gray-500 text-sm">
@@ -521,317 +986,13 @@ const TicketList: React.FC<TicketListProps> = ({
               {month}
             </h2>
             <div className="space-y-3">
-              {monthTickets.map((ticket) => {
-                const isSelected = selectedIds.includes(ticket.id);
-                const merchantName = getMerchantDisplayName(ticket);
-                return (
-                  <div
-                    key={ticket.id}
-                    onPointerDown={(e) => handleCardPointerDown(e, ticket.id)}
-                    onPointerMove={handleCardPointerMove}
-                    onPointerUp={clearLongPressTimer}
-                    onPointerCancel={clearLongPressTimer}
-                    onContextMenu={(e) => {
-                      if (selectionMode) e.preventDefault();
-                    }}
-                    onClick={() => handleCardClick(ticket.id)}
-                    className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-colors cursor-pointer relative select-none ${
-                      selectionMode && isSelected
-                        ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-100'
-                        : 'bg-white border-gray-100 active:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                      {selectionMode && (
-                        <div
-                          className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${
-                            isSelected
-                              ? 'bg-indigo-600 border-indigo-600 text-white'
-                              : 'bg-white border-gray-300'
-                          }`}
-                          aria-checked={isSelected}
-                          role="checkbox"
-                        >
-                          {isSelected && <Check size={14} strokeWidth={3} />}
-                        </div>
-                      )}
-
-                      <div className="w-12 h-12 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 shrink-0">
-                        <Store size={24} />
-                      </div>
-                      <div className="min-w-0">
-                        <h3 className="font-semibold text-gray-900 truncate">
-                          {merchantName}
-                        </h3>
-                        <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Calendar size={12} />
-                            <span>
-                              {format(parseISO(ticket.date), "dd 'de' MMM", { locale: es })}
-                            </span>
-                          </span>
-                          {ticket.categoryId && categoryMap.has(ticket.categoryId) && (
-                            <span className="text-indigo-600 font-semibold">
-                              · {categoryMap.get(ticket.categoryId)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
-                      <div className="text-right">
-                        <span className="text-lg font-bold text-gray-900 tabular-nums block">
-                          {ticket.totalAmount.toLocaleString('es-ES', {
-                            style: 'currency',
-                            currency: 'EUR',
-                          })}
-                        </span>
-                        {getStatusBadge(ticket.status)}
-                      </div>
-                      {!selectionMode && (
-                        <div className="relative">
-                          <button
-                            type="button"
-                            aria-label={`Opciones de ${merchantName}`}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              clearLongPressTimer();
-                              setOpenMenuId(openMenuId === ticket.id ? null : ticket.id);
-                            }}
-                            className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg active-scale transition-colors"
-                          >
-                            <MoreVertical size={18} />
-                          </button>
-                          {openMenuId === ticket.id && (
-                            <div
-                              onPointerDown={(e) => e.stopPropagation()}
-                              className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[190px] py-2 overflow-hidden"
-                            >
-                              {(!ticket.status || ticket.status === 'borrador') && computeRepartoCompleto(ticket) && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
-                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-orange-600 hover:bg-orange-50 transition-colors"
-                                >
-                                  <CreditCard size={16} />
-                                  Marcar repartido
-                                </button>
-                              )}
-                              {ticket.status === 'repartido' && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleShare(ticket); }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
-                                  >
-                                    <Share2 size={16} />
-                                    Compartir resumen
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
-                                  >
-                                    <Check size={16} />
-                                    Marcar como pagado
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                                  >
-                                    <RotateCcw size={16} />
-                                    Reabrir ticket
-                                  </button>
-                                </>
-                              )}
-                              {ticket.status === 'pagado' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
-                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                                >
-                                  <RotateCcw size={16} />
-                                  Reabrir ticket
-                                </button>
-                              )}
-                              <div className="border-t border-gray-100 my-1" />
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); handleSingleTrashClick(e, ticket.id); }}
-                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
-                              >
-                                <Trash2 size={16} />
-                                Eliminar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {monthTickets.map((ticket) => renderTicketCard(ticket, "dd 'de' MMM"))}
             </div>
           </section>
         ))
       ) : (
         <div className="space-y-3 pb-8">
-          {sortedFilteredTickets.map((ticket) => {
-            const isSelected = selectedIds.includes(ticket.id);
-            const merchantName = getMerchantDisplayName(ticket);
-            return (
-              <div
-                key={ticket.id}
-                onPointerDown={(e) => handleCardPointerDown(e, ticket.id)}
-                onPointerMove={handleCardPointerMove}
-                onPointerUp={clearLongPressTimer}
-                onPointerCancel={clearLongPressTimer}
-                onContextMenu={(e) => {
-                  if (selectionMode) e.preventDefault();
-                }}
-                onClick={() => handleCardClick(ticket.id)}
-                className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-colors cursor-pointer relative select-none ${
-                  selectionMode && isSelected
-                    ? 'bg-indigo-50/70 border-indigo-300 ring-2 ring-indigo-100'
-                    : 'bg-white border-gray-100 active:bg-gray-50'
-                }`}
-              >
-                <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                  {selectionMode && (
-                    <div
-                      className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center shrink-0 transition-colors ${
-                        isSelected
-                          ? 'bg-indigo-600 border-indigo-600 text-white'
-                          : 'bg-white border-gray-300'
-                      }`}
-                      aria-checked={isSelected}
-                      role="checkbox"
-                    >
-                      {isSelected && <Check size={14} strokeWidth={3} />}
-                    </div>
-                  )}
-
-                  <div className="w-12 h-12 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600 shrink-0">
-                    <Store size={24} />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-gray-900 truncate">
-                      {merchantName}
-                    </h3>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Calendar size={12} />
-                        <span>
-                          {format(parseISO(ticket.date), "dd 'de' MMM yyyy", { locale: es })}
-                        </span>
-                      </span>
-                      {ticket.categoryId && categoryMap.has(ticket.categoryId) && (
-                        <span className="text-indigo-600 font-semibold">
-                          · {categoryMap.get(ticket.categoryId)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
-                  <div className="text-right">
-                    <span className="text-lg font-bold text-gray-900 tabular-nums block">
-                      {ticket.totalAmount.toLocaleString('es-ES', {
-                        style: 'currency',
-                        currency: 'EUR',
-                      })}
-                    </span>
-                    {getStatusBadge(ticket.status)}
-                  </div>
-                  {!selectionMode && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        aria-label={`Opciones de ${merchantName}`}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          clearLongPressTimer();
-                          setOpenMenuId(openMenuId === ticket.id ? null : ticket.id);
-                        }}
-                        className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg active-scale transition-colors"
-                      >
-                        <MoreVertical size={18} />
-                      </button>
-                      {openMenuId === ticket.id && (
-                        <div
-                          onPointerDown={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-9 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl min-w-[190px] py-2 overflow-hidden"
-                        >
-                          {(!ticket.status || ticket.status === 'borrador') && computeRepartoCompleto(ticket) && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'repartido'); }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-orange-600 hover:bg-orange-50 transition-colors"
-                            >
-                              <CreditCard size={16} />
-                              Marcar repartido
-                            </button>
-                          )}
-                          {ticket.status === 'repartido' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleShare(ticket); }}
-                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
-                              >
-                                <Share2 size={16} />
-                                Compartir resumen
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'pagado'); }}
-                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-green-600 hover:bg-green-50 transition-colors"
-                              >
-                                <Check size={16} />
-                                Marcar como pagado
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
-                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                              >
-                                <RotateCcw size={16} />
-                                Reabrir ticket
-                              </button>
-                            </>
-                          )}
-                          {ticket.status === 'pagado' && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleUpdateStatus(ticket.id, 'borrador'); }}
-                              className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors"
-                            >
-                              <RotateCcw size={16} />
-                              Reabrir ticket
-                            </button>
-                          )}
-                          <div className="border-t border-gray-100 my-1" />
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); handleSingleTrashClick(e, ticket.id); }}
-                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-50 transition-colors"
-                          >
-                            <Trash2 size={16} />
-                            Eliminar
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {sortedFilteredTickets.map((ticket) => renderTicketCard(ticket, "dd 'de' MMM yyyy"))}
         </div>
       )}
 
