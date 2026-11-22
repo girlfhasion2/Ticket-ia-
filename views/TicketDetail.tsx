@@ -481,21 +481,6 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     return line.quantity - assigned > 0.001;
   }).length;
   const showSplitProgress = ticket.lines.length > 0 && ticket.participants.length > 0;
-  const splitProgressPct =
-    ticket.totalAmount > 0
-      ? Math.min(
-          100,
-          Math.max(
-            0,
-            Math.abs(totalRepartido - ticket.totalAmount) < 0.01 && pendingCount === 0
-              ? 100
-              : (totalRepartido / ticket.totalAmount) * 100
-          )
-        )
-      : pendingCount === 0 && showSplitProgress
-      ? 100
-      : 0;
-  const isSplitBarComplete = splitProgressPct >= 99.99;
 
   const handleStatusChange = async (newStatus: 'borrador' | 'repartido' | 'pagado') => {
     const updated = { ...ticket, status: newStatus };
@@ -599,25 +584,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 )}
               </span>
 
-              {isSplitTabWithProgress ? (
+              {isActive && (
                 <span
                   aria-hidden="true"
-                  className="absolute bottom-0 left-0 right-0 h-[3px] bg-gray-200 overflow-hidden"
-                >
-                  <span
-                    className={`block h-full transition-all duration-500 ${
-                      isSplitBarComplete ? 'bg-green-500' : 'bg-indigo-500'
-                    }`}
-                    style={{ width: `${splitProgressPct}%` }}
-                  />
-                </span>
-              ) : (
-                isActive && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-600"
-                  />
-                )
+                  className="absolute bottom-0 left-0 right-0 h-[2px] bg-indigo-600"
+                />
               )}
             </button>
           );
