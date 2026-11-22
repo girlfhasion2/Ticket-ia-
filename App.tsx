@@ -5,11 +5,13 @@ import { Ticket, AppState, TicketSortConfig } from './types';
 import TicketList from './views/TicketList';
 import TicketDetail from './views/TicketDetail';
 import Settings from './views/Settings';
+import Friends from './views/Friends';
+import { friendsService } from './friendsService';
 import Auth from './views/Auth';
 import ResetPassword from './views/ResetPassword';
 import { useAuth } from './src/contexts/AuthContext';
 import { supabase, supabaseReady, wasRecoveryDetected } from './src/lib/supabase';
-import { Home, Settings as SettingsIcon, PlusCircle, RefreshCw } from 'lucide-react';
+import { Home, Settings as SettingsIcon, PlusCircle, RefreshCw, Users } from 'lucide-react';
 
 function hasRecoveryHash(): boolean {
   const hash = window.location.hash;
@@ -35,6 +37,7 @@ const App: React.FC = () => {
     direction: 'desc',
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -88,6 +91,23 @@ const App: React.FC = () => {
       setSearchQuery('');
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user || view === 'friends') return;
+    let active = true;
+    friendsService
+      .listRequests()
+      .then((rq) => {
+        if (active) setPendingFriendRequests(rq.filter((r) => r.direction === 'incoming').length);
+      })
+      .catch(() => {
+        // Si la parte social aún no está activada en el servidor, no se muestra el aviso.
+        if (active) setPendingFriendRequests(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user, view]);
 
   const navigateToTicket = (id: string) => {
     setIsListSelectionMode(false);
@@ -173,6 +193,8 @@ const App: React.FC = () => {
             }}
           />
         ) : null;
+      case 'friends':
+        return <Friends onPendingCountChange={setPendingFriendRequests} />;
       case 'settings':
         return <Settings />;
       default:
@@ -197,13 +219,26 @@ const App: React.FC = () => {
       </main>
 
       {view !== 'detail' && !(view === 'list' && isListSelectionMode) && (
-        <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-12 py-3 flex justify-between items-center z-50">
+        <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-6 py-3 flex justify-around items-center z-50">
           <button 
             onClick={() => setView('list')}
             className={`flex flex-col items-center gap-1 transition-colors ${view === 'list' ? 'text-indigo-600' : 'text-gray-400'}`}
           >
             <Home size={24} />
             <span className="text-[10px] font-bold uppercase tracking-widest">Tickets</span>
+          </button>
+
+          <button 
+            onClick={() => setView('friends')}
+            className={`relative flex flex-col items-center gap-1 transition-colors ${view === 'friends' ? 'text-indigo-600' : 'text-gray-400'}`}
+          >
+            <Users size={24} />
+            {pendingFriendRequests > 0 && (
+              <span className="absolute -top-1 right-0 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+                {pendingFriendRequests}
+              </span>
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
           </button>
           
           <button 
