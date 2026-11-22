@@ -1,17 +1,53 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { db } from '../db';
 import { 
   Download, Upload, Trash2, ShieldCheck, 
   LogOut, Mail,
-  Sun, Moon, Monitor, Palette
+  Sun, Moon, Monitor, Palette, Users, Pencil, Check, X
 } from 'lucide-react';
+import { friendsService, MyProfile } from '../friendsService';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ThemeMode, getStoredTheme, setTheme } from '../utils/theme';
 
 const Settings: React.FC = () => {
   const { user, signOut } = useAuth();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
+
+  const [profile, setProfile] = useState<MyProfile | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [profileBusy, setProfileBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    friendsService
+      .getMyProfile()
+      .then((p) => {
+        if (active) setProfile(p);
+      })
+      .catch((e: any) => {
+        if (active) setProfileError(e?.message || 'No se pudo cargar tu perfil.');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const saveProfile = async (patch: { displayName?: string; discoverableByEmail?: boolean }) => {
+    setProfileBusy(true);
+    try {
+      await friendsService.updateMyProfile(patch);
+      setProfile(await friendsService.getMyProfile());
+      setProfileError(null);
+      setEditingName(false);
+    } catch (e: any) {
+      setProfileError(e?.message || 'No se pudo guardar.');
+    } finally {
+      setProfileBusy(false);
+    }
+  };
 
   const changeTheme = (mode: ThemeMode) => {
     setThemeMode(mode);
@@ -98,6 +134,108 @@ const Settings: React.FC = () => {
               </div>
               <LogOut size={22} className="text-gray-400 group-hover:text-red-600" />
             </button>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-50">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
+              <Users size={18} className="text-indigo-600" />
+              Perfil para amigos
+            </h3>
+          </div>
+          <div className="p-4 space-y-4">
+            {profileError && (
+              <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                {profileError}
+              </p>
+            )}
+            {profile && (
+              <>
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                    Tu nombre de usuario
+                  </p>
+                  {editingName ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        autoFocus
+                        value={nameDraft}
+                        onChange={(e) => setNameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && nameDraft.trim()) saveProfile({ displayName: nameDraft });
+                          if (e.key === 'Escape') setEditingName(false);
+                        }}
+                        maxLength={40}
+                        className="flex-1 min-w-0 h-11 border-2 border-indigo-600 rounded-xl px-3 text-sm font-extrabold text-gray-900 bg-white outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveProfile({ displayName: nameDraft })}
+                        disabled={profileBusy || !nameDraft.trim()}
+                        aria-label="Guardar nombre"
+                        className="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-40"
+                      >
+                        <Check size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingName(false)}
+                        aria-label="Cancelar"
+                        className="w-11 h-11 rounded-xl border border-gray-200 bg-white text-gray-500 flex items-center justify-center"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 p-4 bg-gray-50 rounded-2xl">
+                      <p className="flex-1 min-w-0 truncate text-sm font-black text-gray-900">
+                        {profile.displayName}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNameDraft(profile.displayName);
+                          setEditingName(true);
+                        }}
+                        aria-label="Editar nombre"
+                        className="w-8 h-8 rounded-full bg-white text-indigo-700 flex items-center justify-center shrink-0 border border-gray-100"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight mt-2">
+                    Es el nombre que ven tus amigos
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => saveProfile({ discoverableByEmail: !profile.discoverableByEmail })}
+                  disabled={profileBusy}
+                  className="w-full flex items-center justify-between gap-3 p-4 bg-gray-50 rounded-2xl text-left"
+                >
+                  <div>
+                    <p className="font-bold text-gray-800 text-sm">Permitir que me encuentren por correo</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">
+                      Si lo desactivas, solo podrán añadirte con tu código
+                    </p>
+                  </div>
+                  <span
+                    className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${
+                      profile.discoverableByEmail ? 'bg-indigo-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                        profile.discoverableByEmail ? 'translate-x-5' : ''
+                      }`}
+                    />
+                  </span>
+                </button>
+              </>
+            )}
           </div>
         </section>
 

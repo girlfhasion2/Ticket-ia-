@@ -76,10 +76,6 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const [sentNotice, setSentNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Perfil propio
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState('');
-
   const showToast = (msg: string) => {
     setToast(msg);
     window.clearTimeout(toastTimer.current);
@@ -232,18 +228,6 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
     }
   };
 
-  const saveMyName = async () => {
-    await run(() => friendsService.updateMyProfile({ displayName: nameDraft }), 'Nombre guardado');
-    setEditingName(false);
-  };
-
-  const toggleDiscoverable = async () => {
-    if (!profile) return;
-    await run(() =>
-      friendsService.updateMyProfile({ discoverableByEmail: !profile.discoverableByEmail })
-    );
-  };
-
   const tabClass = (on: boolean) =>
     `flex-1 py-3 text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 border-b-2 ${
       on ? 'text-indigo-700 border-indigo-600' : 'text-gray-500 border-transparent'
@@ -305,7 +289,7 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
               </button>
               <p className="text-[11px] font-semibold text-gray-400">
                 Por privacidad, el mensaje es el mismo exista o no esa cuenta. Cada persona puede
-                desactivar en su perfil que la encuentren por correo.
+                desactivar en Ajustes que la encuentren por correo.
               </p>
             </>
           )}
@@ -569,76 +553,6 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
               </button>
             ))}
 
-            {profile && (
-              <div className="bg-white border border-gray-100 rounded-2xl p-4 mt-4 space-y-3">
-                <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                  Tu perfil
-                </div>
-                {editingName ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && saveMyName()}
-                      maxLength={40}
-                      className="flex-1 min-w-0 h-10 border-2 border-indigo-600 rounded-xl px-3 text-sm font-extrabold text-gray-900 bg-white outline-none"
-                    />
-                    <button
-                      onClick={saveMyName}
-                      disabled={busy || !nameDraft.trim()}
-                      aria-label="Guardar nombre"
-                      className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center disabled:opacity-40"
-                    >
-                      <Check size={18} />
-                    </button>
-                    <button
-                      onClick={() => setEditingName(false)}
-                      aria-label="Cancelar"
-                      className="w-10 h-10 rounded-xl border border-gray-200 bg-white text-gray-500 flex items-center justify-center"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm font-black text-gray-900 flex-1 truncate">
-                      {profile.displayName}
-                    </div>
-                    <button
-                      onClick={() => { setNameDraft(profile.displayName); setEditingName(true); }}
-                      aria-label="Editar mi nombre"
-                      className="w-7 h-7 rounded-full bg-gray-100 text-indigo-700 flex items-center justify-center"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                  </div>
-                )}
-                <p className="text-[11px] font-semibold text-gray-500 -mt-1">
-                  Este es el nombre que verán tus amigos.
-                </p>
-                <button
-                  onClick={toggleDiscoverable}
-                  disabled={busy}
-                  className="w-full flex items-center justify-between gap-3 text-left"
-                >
-                  <span className="text-xs font-bold text-gray-700">
-                    Permitir que me encuentren por correo
-                  </span>
-                  <span
-                    className={`w-11 h-6 rounded-full p-0.5 transition-colors shrink-0 ${
-                      profile.discoverableByEmail ? 'bg-indigo-600' : 'bg-gray-200'
-                    }`}
-                  >
-                    <span
-                      className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                        profile.discoverableByEmail ? 'translate-x-5' : ''
-                      }`}
-                    />
-                  </span>
-                </button>
-              </div>
-            )}
           </>
         )}
 
