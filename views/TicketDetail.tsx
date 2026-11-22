@@ -70,6 +70,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const [isDragging, setIsDragging] = useState(false);
   const [pendingLineModal, setPendingLineModal] = useState<string | null>(null);
   const [personDetailModal, setPersonDetailModal] = useState<string | null>(null);
+  const [newLineModal, setNewLineModal] = useState<{ name: string; quantity: number; price: string } | null>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
   const isPersistedRef = useRef<boolean>(!initialTicket);
@@ -275,16 +276,34 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     setOcrError(null);
   };
 
-  const addLine = () => {
+  const openAddLineModal = () => setNewLineModal({ name: '', quantity: 1, price: '' });
+
+  const parsePrice = (raw: string): number => {
+    const n = parseFloat(raw.replace(',', '.'));
+    return Number.isFinite(n) ? n : NaN;
+  };
+
+  const confirmAddLine = async () => {
+    if (!newLineModal) return;
+    const name = newLineModal.name.trim();
+    const price = parsePrice(newLineModal.price);
+    const quantity = Math.max(1, Math.round(newLineModal.quantity || 1));
+    if (!name || !Number.isFinite(price) || price < 0) return;
+
     const newLine: TicketLine = {
       id: crypto.randomUUID(),
-      description: "Nuevo Producto",
-      quantity: 1,
-      unitPrice: 0,
-      total: 0,
+      description: name,
+      quantity,
+      unitPrice: price,
+      total: Math.round(quantity * price * 100) / 100,
       assignments: []
     };
-    saveTicketAndSyncTotal({ ...ticket, lines: [...ticket.lines, newLine] });
+    setNewLineModal(null);
+    await saveTicketAndSyncTotal({ ...ticket, lines: [...ticket.lines, newLine] });
+    // Lleva la vista al producto recién añadido, al final de la lista
+    setTimeout(() => {
+      document.getElementById(`line-${newLine.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 150);
   };
 
   const updateLine = (lineId: string, data: Partial<TicketLine>) => {
@@ -887,11 +906,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
             <div className="space-y-4">
               <div className="flex items-center justify-between px-2 pt-2">
                 <h3 className="font-black text-gray-900 uppercase text-[10px] tracking-widest flex items-center gap-2"><CheckCircle2 size={14} className="text-green-500" />Productos en la cuenta</h3>
-                <button onClick={addLine} className="flex items-center gap-1.5 text-[10px] font-black text-indigo-600 bg-indigo-50 px-4 py-2.5 rounded-xl active-scale shadow-sm ring-2 ring-indigo-100"><Plus size={14} /> AÑADIR</button>
+                <button onClick={openAddLineModal} className="flex items-center gap-1.5 text-[10px] font-black text-indigo-600 bg-indigo-50 px-4 py-2.5 rounded-xl active-scale shadow-sm ring-2 ring-indigo-100"><Plus size={14} /> AÑADIR</button>
               </div>
               <div className="space-y-3">
                 {ticket.lines.map(line => (
-                  <div key={line.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md animate-in slide-in-from-left-2">
+                  <div key={line.id} id={`line-${line.id}`} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md animate-in slide-in-from-left-2">
                     <div className="mb-3"><input type="text" value={line.description} onChange={(e) => updateLine(line.id, { description: e.target.value })} className="w-full font-bold text-gray-800 text-sm outline-none border-b border-transparent focus:border-indigo-100 py-1 transition-colors" /></div>
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1.5 gap-2 ring-1 ring-gray-100">
@@ -1231,6 +1250,103 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 <span className="text-2xl font-black text-gray-900 tabular-nums">{total.toFixed(2)}€</span>
               </div>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal: añadir un producto nuevo */}
+      {newLineModal && (() => {
+        const price = parsePrice(newLineModal.price);
+        const qty = Math.max(0, Math.round(newLineModal.quantity || 0));
+        const nameOk = newLineModal.name.trim().length > 0;
+        const priceOk = Number.isFinite(price) && price >= 0;
+        const canSubmit = nameOk && priceOk && qty >= 1;
+        const lineTotal = canSubmit ? Math.round(qty * price * 100) / 100 : 0;
+        return (
+          <div
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => setNewLineModal(null)}
+          >
+            <form
+              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+              onSubmit={(e) => { e.preventDefault(); void confirmAddLine(); }}
+            >
+              <div className="p-5 flex justify-between items-center text-white bg-indigo-900">
+                <h4 className="font-black text-sm uppercase tracking-widest">Nuevo producto</h4>
+                <button
+                  type="button"
+                  onClick={() => setNewLineModal(null)}
+                  aria-label="Cerrar"
+                  className="p-1.5 bg-white/20 hover:bg-white/30 rounded-xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-5 overflow-y-auto">
+                <label className="block">
+                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nombre</span>
+                  <input
+                    type="text"
+                    autoFocus
+                    autoComplete="off"
+                    placeholder="Ej. Cerveza"
+                    value={newLineModal.name}
+                    onChange={(e) => setNewLineModal({ ...newLineModal, name: e.target.value })}
+                    className="mt-1.5 w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:border-indigo-400"
+                  />
+                </label>
+
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Unidades</span>
+                    <UnitsStepper
+                      value={newLineModal.quantity}
+                      canIncrease
+                      onChange={(v) => setNewLineModal({ ...newLineModal, quantity: v })}
+                    />
+                  </div>
+                  <label className="block flex-1 min-w-0">
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Precio unidad</span>
+                    <div className="mt-1.5 flex items-center bg-gray-50 border border-gray-200 rounded-xl px-3 focus-within:border-indigo-400">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        placeholder="0,00"
+                        value={newLineModal.price}
+                        onChange={(e) => setNewLineModal({ ...newLineModal, price: e.target.value })}
+                        className="w-full min-w-0 bg-transparent py-3 text-sm font-bold text-gray-900 focus:outline-none"
+                      />
+                      <span className="text-gray-400 font-bold text-sm ml-1">€</span>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl bg-indigo-50 px-4 py-3">
+                  <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Total</span>
+                  <span className="text-xl font-black text-indigo-900 tabular-nums">{lineTotal.toFixed(2)}€</span>
+                </div>
+              </div>
+
+              <div className="p-5 pt-0 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setNewLineModal(null)}
+                  className="flex-1 py-3.5 rounded-2xl bg-gray-100 text-gray-600 text-[11px] font-black uppercase tracking-widest active-scale"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="flex-[2] py-3.5 rounded-2xl bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 active-scale disabled:opacity-40"
+                >
+                  Añadir producto
+                </button>
+              </div>
+            </form>
           </div>
         );
       })()}
