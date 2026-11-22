@@ -5,7 +5,8 @@ import { parseTicketImage } from '../geminiService';
 import {
   ArrowLeft, Camera, Images, Trash2, Plus, Users,
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
-  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check, Download
+  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check, Download,
+  ChevronDown
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
@@ -103,6 +104,8 @@ interface TicketDetailProps {
   onBack: () => void;
 }
 
+const SPLIT_MODE_STORAGE_KEY = 'ticketia_split_mode';
+
 const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, onBack }) => {
   const [ticket, setTicket] = useState<Ticket | null>(
     initialTicket
@@ -111,7 +114,20 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   );
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeTab, setActiveTab] = useState<'info' | 'items' | 'split' | 'summary'>('info');
-  const [splitFilter, setSplitFilter] = useState<'all' | 'pending'>('all');
+  const [splitMode, setSplitMode] = useState<'by-product' | 'by-person'>(() => {
+    try {
+      return localStorage.getItem(SPLIT_MODE_STORAGE_KEY) === 'by-person'
+        ? 'by-person'
+        : 'by-product';
+    } catch {
+      return 'by-product';
+    }
+  });
+  const [splitFilter, setSplitFilter] = useState<'all' | 'pending' | 'person'>('all');
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [isPersonPickerOpen, setIsPersonPickerOpen] = useState(false);
+  const [expandedShareLineId, setExpandedShareLineId] = useState<string | null>(null);
+  const [retainedLineIds, setRetainedLineIds] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [newParticipantName, setNewParticipantName] = useState("");
@@ -128,8 +144,32 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const newLinePriceRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
+  const personPickerRef = useRef<HTMLDivElement>(null);
   const isPersistedRef = useRef<boolean>(!initialTicket);
   const pendingSaveRef = useRef<Promise<void>>(Promise.resolve());
+
+  useEffect(() => {
+    setRetainedLineIds([]);
+    setIsPersonPickerOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!isPersonPickerOpen) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (personPickerRef.current && !personPickerRef.current.contains(e.target as Node)) {
+        setIsPersonPickerOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsPersonPickerOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isPersonPickerOpen]);
 
   useEffect(() => {
     if (initialTicket && initialTicket.id === ticketId) {
@@ -484,6 +524,152 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
       return l;
     });
     saveTicketAndSyncTotal({ ...ticket, lines });
+  };
+
+  const retainLineOnFilter = (lineId: string) => {
+    if (splitMode === 'by-person' && (splitFilter === 'pending' || splitFilter === 'person')) {
+      setRetainedLineIds(prev => (prev.includes(lineId) ? prev : [...prev, lineId]));
+    }
+  };
+
+  const handleChangeSplitMode = (mode: 'by-product' | 'by-person') => {
+    setSplitMode(mode);
+    setIsPersonPickerOpen(false);
+    setExpandedShareLineId(null);
+    setRetainedLineIds([]);
+    if (mode === 'by-product' && splitFilter === 'person') {
+      setSplitFilter('all');
+    }
+    try {
+      localStorage.setItem(SPLIT_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Ignorar errores de almacenamiento
+    }
+  };
+
+  const handleChangeSplitFilter = (nextFilter: 'all' | 'pending' | 'person') => {
+    setSplitFilter(nextFilter);
+    setRetainedLineIds([]);
+  };
+
+  const handleSelectPerson = (personId: string) => {
+    setSelectedPersonId(personId);
+    setIsPersonPickerOpen(false);
+    setRetainedLineIds([]);
+  };
+
+  const addPersonWholeUnit = (lineId: string, personId: string) => {
+    const targetLine = ticket.lines.find(l => l.id === lineId);
+    if (!targetLine) return;
+    const assignedToPeople = targetLine.assignments.reduce(
+      (sum, a) => (a.personIds.length > 0 ? sum + a.units : sum),
+      0
+    );
+    if (targetLine.quantity - assignedToPeople < 1 - 0.001) return;
+
+    retainLineOnFilter(lineId);
+
+    const lines = ticket.lines.map(l => {
+      if (l.id !== lineId) return l;
+
+      let nextAssignments = l.assignments.map(a => ({ ...a }));
+      const totalInGroups = nextAssignments.reduce((sum, a) => sum + a.units, 0);
+      let overflow = Math.max(0, totalInGroups + 1 - l.quantity);
+      if (overflow > 0.001) {
+        nextAssignments = nextAssignments
+          .map(a => {
+            if (overflow <= 0.001 || a.personIds.length > 0 || a.units <= 0) return a;
+            const take = Math.min(a.units, overflow);
+            overflow -= take;
+            return { ...a, units: Number((a.units - take).toFixed(4)) };
+          })
+          .filter(a => a.units > 0.001 || a.personIds.length > 0);
+      }
+
+      const soloIdx = nextAssignments.findIndex(
+        a => a.personIds.length === 1 && a.personIds[0] === personId
+      );
+      if (soloIdx >= 0) {
+        nextAssignments[soloIdx] = {
+          ...nextAssignments[soloIdx],
+          units: nextAssignments[soloIdx].units + 1,
+        };
+      } else {
+        nextAssignments.push({
+          id: crypto.randomUUID(),
+          units: 1,
+          personIds: [personId],
+        });
+      }
+
+      return { ...l, assignments: nextAssignments };
+    });
+
+    saveTicketAndSyncTotal({ ...ticket, lines });
+  };
+
+  const removePersonWholeUnit = (lineId: string, personId: string) => {
+    const targetLine = ticket.lines.find(l => l.id === lineId);
+    if (!targetLine) return;
+    const hasSolo = targetLine.assignments.some(
+      a => a.personIds.length === 1 && a.personIds[0] === personId && a.units > 0
+    );
+    if (!hasSolo) return;
+
+    retainLineOnFilter(lineId);
+
+    const lines = ticket.lines.map(l => {
+      if (l.id !== lineId) return l;
+      let decremented = false;
+      const nextAssignments = l.assignments
+        .map(a => {
+          if (!decremented && a.personIds.length === 1 && a.personIds[0] === personId && a.units > 0) {
+            decremented = true;
+            return { ...a, units: a.units - 1 };
+          }
+          return a;
+        })
+        .filter(a => !(a.personIds.length === 1 && a.personIds[0] === personId && a.units <= 0));
+      return { ...l, assignments: nextAssignments };
+    });
+
+    saveTicketAndSyncTotal({ ...ticket, lines });
+  };
+
+  const addSharedGroupForPerson = (lineId: string, personId: string) => {
+    const targetLine = ticket.lines.find(l => l.id === lineId);
+    if (!targetLine) return;
+    const consumedInGroups = targetLine.assignments.reduce((sum, a) => sum + a.units, 0);
+    const remainingToGroup = Math.max(0, targetLine.quantity - consumedInGroups);
+    if (remainingToGroup <= 0.001) return;
+
+    retainLineOnFilter(lineId);
+
+    const newUnits = remainingToGroup >= 1 ? 1 : Number(remainingToGroup.toFixed(2));
+    const lines = ticket.lines.map(l => {
+      if (l.id !== lineId) return l;
+      return {
+        ...l,
+        assignments: [
+          ...l.assignments,
+          { id: crypto.randomUUID(), units: newUnits, personIds: [personId] },
+        ],
+      };
+    });
+    saveTicketAndSyncTotal({ ...ticket, lines });
+  };
+
+  const toggleAllParticipantsInAssignment = (lineId: string, assignmentId: string) => {
+    const targetLine = ticket.lines.find(l => l.id === lineId);
+    const targetAsgn = targetLine?.assignments.find(a => a.id === assignmentId);
+    if (!targetAsgn) return;
+    retainLineOnFilter(lineId);
+    const allIds = ticket.participants.map(p => p.id);
+    const allSelected =
+      allIds.length > 0 && allIds.every(id => targetAsgn.personIds.includes(id));
+    updateAssignment(lineId, assignmentId, {
+      personIds: allSelected ? [] : allIds,
+    });
   };
 
   const gcd = (a: number, b: number): number => {
@@ -957,30 +1143,47 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         )}
 
         {activeTab === 'items' && (
-          <div className="space-y-6 pb-40 animate-in fade-in duration-300">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-2 pt-2">
-                <h3 className="font-black text-gray-900 uppercase text-[10px] tracking-widest flex items-center gap-2"><CheckCircle2 size={14} className="text-green-500" />Productos en la cuenta</h3>
-                <button onClick={openAddLineModal} className="flex items-center gap-1.5 text-[10px] font-black text-indigo-600 bg-indigo-50 px-4 py-2.5 rounded-xl active-scale shadow-sm ring-2 ring-indigo-100"><Plus size={14} /> AÑADIR</button>
+          <div className="pb-10 animate-in fade-in duration-300">
+            <div className="sticky -top-4 z-10 -mx-4 -mt-4 px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">
+                  Total cuenta
+                </p>
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span className="text-xl font-black text-indigo-600 tabular-nums leading-none shrink-0">
+                    {formatMoney(ticket.totalAmount)}
+                  </span>
+                  <span className="text-xs font-bold text-gray-500 truncate">
+                    · {ticket.lines.length} {ticket.lines.length === 1 ? 'producto' : 'productos'}
+                  </span>
+                </div>
               </div>
-              <div className="space-y-3">
-                {ticket.lines.map(line => (
-                  <div key={line.id} id={`line-${line.id}`} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md animate-in slide-in-from-left-2">
-                    <div className="mb-3"><input type="text" value={line.description} onChange={(e) => updateLine(line.id, { description: e.target.value })} className="w-full font-bold text-gray-800 text-sm outline-none border-b border-transparent focus:border-indigo-100 py-1 transition-colors" /></div>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1.5 gap-2 ring-1 ring-gray-100">
-                        <input type="number" value={line.quantity} onChange={(e) => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })} className="w-8 bg-transparent font-black text-xs text-center outline-none text-indigo-600" />
-                        <span className="text-gray-400 text-[10px] font-bold">x</span>
-                        <div className="flex items-center"><PriceInput value={line.unitPrice} onChange={(v) => updateLine(line.id, { unitPrice: v })} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-black text-gray-900 text-base tabular-nums">{formatMoney(line.total)}</span>
-                        <button onClick={() => discardLine(line.id)} className="text-gray-400 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100 rounded-lg"><ArchiveX size={16} /></button>
-                      </div>
+              <button
+                type="button"
+                onClick={openAddLineModal}
+                className="flex items-center gap-1.5 text-[10px] font-black text-indigo-600 bg-indigo-50 px-4 py-2.5 rounded-xl active-scale shadow-sm ring-2 ring-indigo-100 shrink-0"
+              >
+                <Plus size={14} /> AÑADIR
+              </button>
+            </div>
+
+            <div className="space-y-3 pt-3">
+              {ticket.lines.map(line => (
+                <div key={line.id} id={`line-${line.id}`} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm transition-all hover:shadow-md animate-in slide-in-from-left-2">
+                  <div className="mb-3"><input type="text" value={line.description} onChange={(e) => updateLine(line.id, { description: e.target.value })} className="w-full font-bold text-gray-800 text-sm outline-none border-b border-transparent focus:border-indigo-100 py-1 transition-colors" /></div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1.5 gap-2 ring-1 ring-gray-100">
+                      <input type="number" value={line.quantity} onChange={(e) => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })} className="w-8 bg-transparent font-black text-xs text-center outline-none text-indigo-600" />
+                      <span className="text-gray-400 text-[10px] font-bold">x</span>
+                      <div className="flex items-center"><PriceInput value={line.unitPrice} onChange={(v) => updateLine(line.id, { unitPrice: v })} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-black text-gray-900 text-base tabular-nums">{formatMoney(line.total)}</span>
+                      <button onClick={() => discardLine(line.id)} className="text-gray-400 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100 rounded-lg"><ArchiveX size={16} /></button>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
 
             {ticket.discardedLines && ticket.discardedLines.length > 0 && (
@@ -1005,19 +1208,6 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 </div>
               </div>
             )}
-
-            <div className="fixed bottom-0 left-0 right-0 max-w-2xl mx-auto p-4 bg-white/60 backdrop-blur-xl border-t border-gray-100 z-30">
-              <div className="p-5 rounded-3xl flex items-center justify-between shadow-2xl bg-indigo-600 text-white">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Total de la Cuenta</p>
-                  <p className="text-3xl font-black tabular-nums">{formatMoney(ticket.totalAmount)}</p>
-                </div>
-                <div className="text-right border-l border-white/20 pl-6">
-                  <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Productos</p>
-                  <p className="text-lg font-bold tabular-nums">{ticket.lines.length}</p>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
@@ -1030,91 +1220,578 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                  <button onClick={() => setActiveTab('info')} className="bg-indigo-600 text-white font-black text-[10px] px-8 py-4 rounded-full mt-6 active-scale uppercase tracking-widest shadow-lg">Añadir Personas</button>
                </div>
              ) : (() => {
-               const visibleLines = splitFilter === 'pending'
-                 ? ticket.lines.filter(line => {
-                     const assigned = line.assignments.reduce((s, a) => a.personIds.length > 0 ? s + a.units : s, 0);
-                     return line.quantity - assigned > 0.001;
-                   })
-                 : ticket.lines;
+               const activePerson =
+                 ticket.participants.find(p => p.id === selectedPersonId) ||
+                 ticket.participants[0];
+
+               const effectiveFilter =
+                 splitMode === 'by-product' && splitFilter === 'person' ? 'all' : splitFilter;
+
+               const visibleLines =
+                 splitMode === 'by-product'
+                   ? effectiveFilter === 'pending'
+                     ? ticket.lines.filter(line => {
+                         const assigned = line.assignments.reduce(
+                           (s, a) => (a.personIds.length > 0 ? s + a.units : s),
+                           0
+                         );
+                         return line.quantity - assigned > 0.001;
+                       })
+                     : ticket.lines
+                   : ticket.lines.filter(line => {
+                       if (effectiveFilter === 'all') return true;
+                       if (retainedLineIds.includes(line.id)) return true;
+                       if (effectiveFilter === 'pending') {
+                         const assigned = line.assignments.reduce(
+                           (s, a) => (a.personIds.length > 0 ? s + a.units : s),
+                           0
+                         );
+                         return line.quantity - assigned > 0.001;
+                       }
+                       return line.assignments.some(
+                         a => a.units > 0 && a.personIds.includes(activePerson.id)
+                       );
+                     });
+
                return (
                  <>
-                   {/* Chips de filtro */}
-                   <div className="sticky -top-4 z-10 -mx-4 -mt-4 flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
-                     <button
-                       onClick={() => setSplitFilter('all')}
-                       className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'all' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
-                     >
-                       Todos
-                     </button>
-                     <button
-                       onClick={() => setSplitFilter('pending')}
-                       className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'pending' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
-                     >
-                       Pendientes {pendingCount > 0 && `(${pendingCount})`}
-                     </button>
+                   {/* Cabecera fija: conmutador, selector de persona (modo persona) y chips de filtro */}
+                   <div className="sticky -top-4 z-10 -mx-4 -mt-4 px-4 py-3 bg-gray-50 border-b border-gray-100 space-y-2.5">
+                     <div className="grid grid-cols-2 gap-1 p-1 bg-gray-200 rounded-2xl">
+                       <button
+                         type="button"
+                         onClick={() => handleChangeSplitMode('by-product')}
+                         className={`min-h-[44px] px-3 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
+                           splitMode === 'by-product'
+                             ? 'bg-white text-indigo-600 shadow-sm'
+                             : 'text-gray-500 hover:text-gray-700'
+                         }`}
+                       >
+                         Por producto
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => handleChangeSplitMode('by-person')}
+                         className={`min-h-[44px] px-3 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
+                           splitMode === 'by-person'
+                             ? 'bg-white text-indigo-600 shadow-sm'
+                             : 'text-gray-500 hover:text-gray-700'
+                         }`}
+                       >
+                         Por persona
+                       </button>
+                     </div>
+
+                     {splitMode === 'by-person' && (
+                       <div className="relative" ref={personPickerRef}>
+                         <button
+                           type="button"
+                           aria-expanded={isPersonPickerOpen}
+                           aria-label={`Persona seleccionada: ${activePerson.name}, ${formatMoney(userTotals[activePerson.id] || 0)}`}
+                           onClick={() => setIsPersonPickerOpen(prev => !prev)}
+                           className="w-full min-h-[48px] px-3.5 py-2 rounded-2xl bg-white border border-gray-200 hover:border-indigo-200 shadow-sm flex items-center justify-between gap-3 active-scale transition-colors"
+                         >
+                           <div className="flex items-center gap-2.5 min-w-0">
+                             <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 font-black text-sm flex items-center justify-center shrink-0">
+                               {activePerson.name.charAt(0).toUpperCase()}
+                             </div>
+                             <span className="font-black text-sm text-gray-900 truncate">
+                               {activePerson.name}
+                             </span>
+                           </div>
+                           <div className="flex items-center gap-2 shrink-0">
+                             <span className="text-base font-black text-indigo-600 tabular-nums">
+                               {formatMoney(userTotals[activePerson.id] || 0)}
+                             </span>
+                             <ChevronDown
+                               size={18}
+                               className={`text-gray-400 transition-transform duration-200 ${
+                                 isPersonPickerOpen ? 'rotate-180 text-indigo-600' : ''
+                               }`}
+                             />
+                           </div>
+                         </button>
+
+                         {isPersonPickerOpen && (
+                           <div className="absolute left-0 right-0 top-full mt-2 z-30 bg-white border border-gray-200 rounded-2xl shadow-xl p-2.5 max-h-[45vh] overflow-y-auto">
+                             <div className="grid grid-cols-2 gap-2">
+                               {ticket.participants.map(p => {
+                                 const isSelected = p.id === activePerson.id;
+                                 return (
+                                   <button
+                                     key={p.id}
+                                     type="button"
+                                     onClick={() => handleSelectPerson(p.id)}
+                                     className={`min-h-[44px] px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-1.5 transition-all active-scale ${
+                                       isSelected
+                                         ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                         : 'bg-gray-50 border-gray-100 text-gray-800 hover:border-indigo-200'
+                                     }`}
+                                   >
+                                     <span className="text-xs font-bold truncate min-w-0">
+                                       {p.name}
+                                     </span>
+                                     <span
+                                       className={`text-xs font-black tabular-nums shrink-0 ${
+                                         isSelected ? 'text-white' : 'text-indigo-600'
+                                       }`}
+                                     >
+                                       {formatMoney(userTotals[p.id] || 0)}
+                                     </span>
+                                   </button>
+                                 );
+                               })}
+                             </div>
+                           </div>
+                         )}
+                       </div>
+                     )}
+
+                     {/* Chips de filtro */}
+                     <div className="flex flex-wrap gap-2">
+                       <button
+                         type="button"
+                         onClick={() => handleChangeSplitFilter('all')}
+                         className={`min-h-[44px] px-4 py-2 rounded-full text-[11px] font-black border transition-all ${
+                           effectiveFilter === 'all'
+                             ? 'bg-indigo-600 text-white border-indigo-600'
+                             : 'bg-white text-gray-500 border-gray-200'
+                         }`}
+                       >
+                         Todos
+                       </button>
+                       <button
+                         type="button"
+                         onClick={() => handleChangeSplitFilter('pending')}
+                         className={`min-h-[44px] px-4 py-2 rounded-full text-[11px] font-black border transition-all ${
+                           effectiveFilter === 'pending'
+                             ? 'bg-indigo-600 text-white border-indigo-600'
+                             : 'bg-white text-gray-500 border-gray-200'
+                         }`}
+                       >
+                         Pendientes {pendingCount > 0 && `(${pendingCount})`}
+                       </button>
+                       {splitMode === 'by-person' && (
+                         <button
+                           type="button"
+                           onClick={() => handleChangeSplitFilter('person')}
+                           className={`min-h-[44px] max-w-[160px] px-4 py-2 rounded-full text-[11px] font-black border transition-all inline-flex items-center ${
+                             effectiveFilter === 'person'
+                               ? 'bg-indigo-600 text-white border-indigo-600'
+                               : 'bg-white text-gray-500 border-gray-200'
+                           }`}
+                         >
+                           <span className="truncate">De {activePerson.name}</span>
+                         </button>
+                       )}
+                     </div>
                    </div>
 
                    {/* Lista de productos */}
-                   <div className="space-y-6 pt-4">
-                     {visibleLines.length === 0 && (
-                       <div className="text-center py-16 text-gray-400 font-bold text-sm">Todo repartido</div>
-                     )}
-                     {visibleLines.map(line => {
-                       const unitsAssignedToPeople = line.assignments.reduce((sum, a) => a.personIds.length > 0 ? sum + a.units : sum, 0);
-                       const pendingUnits = Math.max(0, line.quantity - unitsAssignedToPeople);
-                       const isFullyAssigned = pendingUnits <= 0;
-                       return (
-                         <div key={line.id} className={`border rounded-3xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-2 transition-all ${isFullyAssigned ? 'bg-green-50 border-green-100 opacity-75' : 'bg-white border-gray-100'}`}>
-                           <div className={`p-4 flex justify-between items-center text-white transition-colors duration-500 ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
-                             <div className="flex items-center gap-2 max-w-[70%]">
-                               <div>
-                                 <h4 className={`font-black text-xs uppercase truncate ${isFullyAssigned ? 'opacity-80' : ''}`}>{line.description}</h4>
-                                 <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
+                   {splitMode === 'by-product' ? (
+                     <div className="space-y-6 pt-4">
+                       {visibleLines.length === 0 && (
+                         <div className="text-center py-16 text-gray-400 font-bold text-sm">Todo repartido</div>
+                       )}
+                       {visibleLines.map(line => {
+                         const unitsAssignedToPeople = line.assignments.reduce((sum, a) => a.personIds.length > 0 ? sum + a.units : sum, 0);
+                         const pendingUnits = Math.max(0, line.quantity - unitsAssignedToPeople);
+                         const isFullyAssigned = pendingUnits <= 0;
+                         return (
+                           <div key={line.id} className={`border rounded-3xl shadow-sm overflow-hidden animate-in slide-in-from-bottom-2 transition-all ${isFullyAssigned ? 'bg-green-50 border-green-100 opacity-75' : 'bg-white border-gray-100'}`}>
+                             <div className={`p-4 flex justify-between items-center text-white transition-colors duration-500 ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
+                               <div className="flex items-center gap-2 max-w-[70%]">
+                                 <div>
+                                   <h4 className={`font-black text-xs uppercase truncate ${isFullyAssigned ? 'opacity-80' : ''}`}>{line.description}</h4>
+                                   <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
+                                 </div>
+                               </div>
+                               <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner flex items-center justify-center ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
+                                 {isFullyAssigned ? <Check size={16} strokeWidth={3} /> : `${pendingUnits} PEND.`}
                                </div>
                              </div>
-                             <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner flex items-center justify-center ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
-                               {isFullyAssigned ? <Check size={16} strokeWidth={3} /> : `${pendingUnits} PEND.`}
+                             <div className="p-4 space-y-4 bg-gray-50/30">
+                               {line.assignments.map(asgn => (
+                                 <div key={asgn.id} className={`p-4 border rounded-2xl animate-in slide-in-from-left-2 duration-200 shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
+                                   <div className="flex items-center justify-between mb-4">
+                                     <div className="flex flex-col">
+                                       <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
+                                       <UnitsStepper
+                                         value={asgn.units}
+                                         canIncrease={line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity}
+                                         onChange={(v) => updateAssignment(line.id, asgn.id, { units: v })}
+                                       />
+                                     </div>
+                                     <button onClick={() => deleteAssignment(line.id, asgn.id)} className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl">
+                                       <Trash2 size={18} />
+                                     </button>
+                                   </div>
+                                   <div className="flex flex-wrap gap-2">
+                                     {ticket.participants.map(p => {
+                                       const isSelected = asgn.personIds.includes(p.id);
+                                       return (
+                                         <button key={p.id} onClick={() => {
+                                           const newPids = isSelected ? asgn.personIds.filter(id => id !== p.id) : [...asgn.personIds, p.id];
+                                           updateAssignment(line.id, asgn.id, { personIds: newPids });
+                                         }} className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} active-scale`}>
+                                           {p.name}
+                                         </button>
+                                       );
+                                     })}
+                                   </div>
+                                 </div>
+                               ))}
+                               {line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity && (
+                                 <button onClick={() => addAssignment(line.id)} className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale">+ NUEVO GRUPO DE REPARTO</button>
+                               )}
                              </div>
                            </div>
-                           <div className="p-4 space-y-4 bg-gray-50/30">
-                             {line.assignments.map(asgn => (
-                               <div key={asgn.id} className={`p-4 border rounded-2xl animate-in slide-in-from-left-2 duration-200 shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
-                                 <div className="flex items-center justify-between mb-4">
-                                   <div className="flex flex-col">
-                                     <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
-                                     <UnitsStepper
-                                       value={asgn.units}
-                                       canIncrease={line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity}
-                                       onChange={(v) => updateAssignment(line.id, asgn.id, { units: v })}
-                                     />
-                                   </div>
-                                   <button onClick={() => deleteAssignment(line.id, asgn.id)} className="text-gray-300 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100/50 rounded-xl">
-                                     <Trash2 size={18} />
+                         );
+                       })}
+                     </div>
+                   ) : (
+                     <div className="space-y-4 pt-4">
+                       {visibleLines.length === 0 && (
+                         <div className="text-center py-16 text-gray-400 font-bold text-sm">
+                           {effectiveFilter === 'pending'
+                             ? 'Todo repartido'
+                             : effectiveFilter === 'person'
+                             ? `${activePerson.name} no tiene productos asignados`
+                             : 'No hay productos en este ticket'}
+                         </div>
+                       )}
+                       {visibleLines.map(line => {
+                         const unitsAssignedToPeople = line.assignments.reduce(
+                           (sum, a) => (a.personIds.length > 0 ? sum + a.units : sum),
+                           0
+                         );
+                         const pendingUnitsRaw = Math.max(0, line.quantity - unitsAssignedToPeople);
+                         const pendingUnits = Number(pendingUnitsRaw.toFixed(2));
+                         const isFullyAssigned = pendingUnitsRaw <= 0.001;
+                         const totalUnitsInAllGroups = line.assignments.reduce(
+                           (sum, a) => sum + a.units,
+                           0
+                         );
+
+                         const wholeUnits = line.assignments.reduce(
+                           (sum, a) =>
+                             a.personIds.length === 1 &&
+                             a.personIds[0] === activePerson.id &&
+                             a.units > 0
+                               ? sum + a.units
+                               : sum,
+                           0
+                         );
+
+                         const sharedGroups = line.assignments.filter(
+                           a =>
+                             a.personIds.length > 1 &&
+                             a.personIds.includes(activePerson.id) &&
+                             a.units > 0
+                         );
+
+                         const joinableGroupsCount = line.assignments.filter(
+                           a =>
+                             a.personIds.length > 0 &&
+                             !a.personIds.includes(activePerson.id) &&
+                             a.units > 0
+                         ).length;
+
+                         const quantityTerms: string[] = [];
+                         if (wholeUnits > 0.001) {
+                           quantityTerms.push(
+                             Number.isInteger(wholeUnits)
+                               ? String(wholeUnits)
+                               : String(Number(wholeUnits.toFixed(2))).replace('.', ',')
+                           );
+                         }
+                         sharedGroups.forEach(asgn => {
+                           const rawNum = Number.isInteger(asgn.units)
+                             ? asgn.units
+                             : Math.round(asgn.units * 100);
+                           const rawDen = Number.isInteger(asgn.units)
+                             ? asgn.personIds.length
+                             : 100 * asgn.personIds.length;
+                           const g = gcd(rawNum, rawDen);
+                           const rn = rawNum / g;
+                           const rd = rawDen / g;
+                           quantityTerms.push(rd === 1 ? String(rn) : `${rn}/${rd}`);
+                         });
+                         const carriesText =
+                           quantityTerms.length > 0 ? quantityTerms.join(' + ') : '0';
+
+                         const personLineAmount = line.assignments.reduce((sum, a) => {
+                           if (a.units <= 0 || !a.personIds.includes(activePerson.id)) return sum;
+                           return sum + (a.units * line.unitPrice) / a.personIds.length;
+                         }, 0);
+
+                         const isShareOpen = expandedShareLineId === line.id;
+                         const canAddWholeUnit = pendingUnitsRaw >= 1 - 0.001;
+                         const canRemoveWholeUnit = wholeUnits > 0.001;
+
+                         return (
+                           <div
+                             key={line.id}
+                             className="bg-white border border-gray-100 rounded-3xl shadow-sm overflow-hidden transition-all"
+                           >
+                             {/* Cabecera del producto coherente con Por producto */}
+                             <div
+                               className={`p-4 flex justify-between items-center gap-3 text-white transition-colors duration-500 ${
+                                 isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'
+                               }`}
+                             >
+                               <div className="min-w-0 flex-1">
+                                 <h4 className="font-black text-xs uppercase truncate">
+                                   {line.description}
+                                 </h4>
+                                 <p className="text-[11px] opacity-80 font-bold tabular-nums">
+                                   {line.quantity} uds × {formatMoney(line.unitPrice)}
+                                 </p>
+                               </div>
+                               <div
+                                 className={`px-3.5 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner flex items-center justify-center shrink-0 ${
+                                   isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'
+                                 }`}
+                               >
+                                 {isFullyAssigned ? (
+                                   <Check size={16} strokeWidth={3} />
+                                 ) : (
+                                   `${pendingUnits} PEND.`
+                                 )}
+                               </div>
+                             </div>
+
+                             {/* Resumen para la persona + controles */}
+                             <div className="p-4 space-y-3.5">
+                               <div className="flex items-center justify-between gap-3">
+                                 <div className="min-w-0 flex-1">
+                                   <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-0.5">
+                                     Lleva
+                                   </span>
+                                   <p className="text-base font-black text-gray-900 tabular-nums break-words">
+                                     {carriesText}
+                                   </p>
+                                 </div>
+                                 <div className="px-3.5 py-2 rounded-2xl bg-indigo-50 border border-indigo-100 text-right shrink-0">
+                                   <span className="block text-[9px] font-black text-indigo-500 uppercase tracking-widest leading-none mb-1">
+                                     Su importe
+                                   </span>
+                                   <span className="text-lg font-black text-indigo-700 tabular-nums leading-none">
+                                     {formatMoney(personLineAmount)}
+                                   </span>
+                                 </div>
+                               </div>
+
+                               <div className="flex items-center justify-between gap-2 pt-0.5">
+                                 <div className="flex items-center gap-2">
+                                   <button
+                                     type="button"
+                                     aria-label={`Quitar una unidad entera de ${line.description}`}
+                                     disabled={!canRemoveWholeUnit}
+                                     onClick={() => removePersonWholeUnit(line.id, activePerson.id)}
+                                     className="w-11 h-11 rounded-xl border-[1.5px] border-indigo-200 bg-indigo-50 text-indigo-600 text-xl font-black flex items-center justify-center active-scale disabled:opacity-30 transition-opacity"
+                                   >
+                                     −
+                                   </button>
+                                   <span className="min-w-[2.25rem] text-center font-black text-sm text-gray-900 tabular-nums">
+                                     {Number.isInteger(wholeUnits)
+                                       ? wholeUnits
+                                       : Number(wholeUnits.toFixed(2))}
+                                   </span>
+                                   <button
+                                     type="button"
+                                     aria-label={`Añadir una unidad entera de ${line.description}`}
+                                     disabled={!canAddWholeUnit}
+                                     onClick={() => addPersonWholeUnit(line.id, activePerson.id)}
+                                     className="w-11 h-11 rounded-xl border-[1.5px] border-indigo-200 bg-indigo-50 text-indigo-600 text-xl font-black flex items-center justify-center active-scale disabled:opacity-30 transition-opacity"
+                                   >
+                                     +
                                    </button>
                                  </div>
-                                 <div className="flex flex-wrap gap-2">
-                                   {ticket.participants.map(p => {
-                                     const isSelected = asgn.personIds.includes(p.id);
-                                     return (
-                                       <button key={p.id} onClick={() => {
-                                         const newPids = isSelected ? asgn.personIds.filter(id => id !== p.id) : [...asgn.personIds, p.id];
-                                         updateAssignment(line.id, asgn.id, { personIds: newPids });
-                                       }} className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} active-scale`}>
-                                         {p.name}
-                                       </button>
-                                     );
-                                   })}
-                                 </div>
+
+                                 <button
+                                   type="button"
+                                   aria-expanded={isShareOpen}
+                                   aria-label={
+                                     joinableGroupsCount > 0
+                                       ? `Compartir ${line.description} (${joinableGroupsCount} ${
+                                           joinableGroupsCount === 1 ? 'grupo disponible' : 'grupos disponibles'
+                                         })`
+                                       : `Compartir ${line.description}`
+                                   }
+                                   onClick={() =>
+                                     setExpandedShareLineId(prev =>
+                                       prev === line.id ? null : line.id
+                                     )
+                                   }
+                                   className={`min-h-[44px] px-3.5 rounded-xl border text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 active-scale transition-colors shrink-0 ${
+                                     isShareOpen
+                                       ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                       : 'bg-gray-50 border-gray-200 text-gray-700 hover:border-indigo-200'
+                                   }`}
+                                 >
+                                   <Users size={15} className="shrink-0" />
+                                   <span>Compartir</span>
+                                   {joinableGroupsCount > 0 && (
+                                     <span
+                                       className={`px-1.5 py-0.5 rounded-md text-[10px] font-black leading-none tabular-nums ${
+                                         isShareOpen
+                                           ? 'bg-white/20 text-white'
+                                           : 'bg-amber-100 text-amber-800'
+                                       }`}
+                                     >
+                                       +{joinableGroupsCount}
+                                     </span>
+                                   )}
+                                 </button>
                                </div>
-                             ))}
-                             {line.assignments.reduce((sum, a) => sum + a.units, 0) < line.quantity && (
-                               <button onClick={() => addAssignment(line.id)} className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale">+ NUEVO GRUPO DE REPARTO</button>
+                             </div>
+
+                             {/* Detalle plegable Compartir */}
+                             {isShareOpen && (
+                               <div className="p-4 space-y-3 bg-gray-50/40 border-t border-gray-100">
+                                 {line.assignments.length === 0 && (
+                                   <p className="text-xs font-bold text-gray-400 text-center py-2">
+                                     Aún no hay grupos creados para este producto.
+                                   </p>
+                                 )}
+                                 {line.assignments.map(asgn => {
+                                   const groupParticipants = ticket.participants.filter(p =>
+                                     asgn.personIds.includes(p.id)
+                                   );
+                                   const allSelected =
+                                     ticket.participants.length > 0 &&
+                                     ticket.participants.every(p =>
+                                       asgn.personIds.includes(p.id)
+                                     );
+                                   const groupSummary =
+                                     groupParticipants.length === 0
+                                       ? 'Sin personas asignadas'
+                                       : groupParticipants.length === 1
+                                       ? `Solo ${groupParticipants[0].name}`
+                                       : `Compartido: ${groupParticipants
+                                           .map(p => p.name)
+                                           .join(', ')}`;
+                                   const perPersonGroupAmount =
+                                     groupParticipants.length > 0
+                                       ? (asgn.units * line.unitPrice) / groupParticipants.length
+                                       : 0;
+
+                                   return (
+                                     <div
+                                       key={asgn.id}
+                                       className={`p-4 border rounded-2xl shadow-sm space-y-3 ${
+                                         asgn.personIds.length > 0
+                                           ? 'bg-white border-gray-100'
+                                           : 'bg-amber-50/50 border-amber-100'
+                                       }`}
+                                     >
+                                       <div className="flex items-center justify-between gap-2">
+                                         <div className="flex flex-col">
+                                           <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter mb-1">
+                                             Unidades
+                                           </span>
+                                           <UnitsStepper
+                                             value={asgn.units}
+                                             canIncrease={totalUnitsInAllGroups < line.quantity}
+                                             onChange={v => {
+                                               retainLineOnFilter(line.id);
+                                               updateAssignment(line.id, asgn.id, { units: v });
+                                             }}
+                                           />
+                                         </div>
+                                         <button
+                                           type="button"
+                                           aria-label="Eliminar grupo"
+                                           onClick={() => {
+                                             retainLineOnFilter(line.id);
+                                             deleteAssignment(line.id, asgn.id);
+                                           }}
+                                           className="w-11 h-11 flex items-center justify-center text-gray-400 hover:text-red-500 active-scale transition-colors bg-gray-100/50 rounded-xl shrink-0"
+                                         >
+                                           <Trash2 size={18} />
+                                         </button>
+                                       </div>
+
+                                       <div className="flex items-center justify-between gap-2 text-xs">
+                                         <span
+                                           className={`font-bold truncate ${
+                                             groupParticipants.length === 0
+                                               ? 'text-amber-700'
+                                               : 'text-gray-600'
+                                           }`}
+                                         >
+                                           {groupSummary}
+                                         </span>
+                                         {groupParticipants.length > 0 && (
+                                           <span className="font-black text-indigo-600 tabular-nums shrink-0">
+                                             {formatMoney(perPersonGroupAmount)}/pers.
+                                           </span>
+                                         )}
+                                       </div>
+
+                                       <div className="flex flex-wrap gap-2">
+                                         <button
+                                           type="button"
+                                           onClick={() =>
+                                             toggleAllParticipantsInAssignment(line.id, asgn.id)
+                                           }
+                                           className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
+                                             allSelected
+                                               ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
+                                               : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                                           }`}
+                                         >
+                                           Todos
+                                         </button>
+                                         {ticket.participants.map(p => {
+                                           const isSelected = asgn.personIds.includes(p.id);
+                                           return (
+                                             <button
+                                               key={p.id}
+                                               type="button"
+                                               onClick={() => {
+                                                 retainLineOnFilter(line.id);
+                                                 const newPids = isSelected
+                                                   ? asgn.personIds.filter(id => id !== p.id)
+                                                   : [...asgn.personIds, p.id];
+                                                 updateAssignment(line.id, asgn.id, {
+                                                   personIds: newPids,
+                                                 });
+                                               }}
+                                               className={`min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${
+                                                 isSelected
+                                                   ? 'bg-indigo-600 border-indigo-600 text-white shadow-md'
+                                                   : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                                               }`}
+                                             >
+                                               {p.name}
+                                             </button>
+                                           );
+                                         })}
+                                       </div>
+                                     </div>
+                                   );
+                                 })}
+
+                                 {totalUnitsInAllGroups < line.quantity - 0.001 && (
+                                   <button
+                                     type="button"
+                                     onClick={() =>
+                                       addSharedGroupForPerson(line.id, activePerson.id)
+                                     }
+                                     className="w-full min-h-[44px] border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-3 px-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
+                                   >
+                                     + NUEVO GRUPO DE REPARTO
+                                   </button>
+                                 )}
+                               </div>
                              )}
                            </div>
-                         </div>
-                       );
-                     })}
-                   </div>
+                         );
+                       })}
+                     </div>
+                   )}
                  </>
                );
              })()}
