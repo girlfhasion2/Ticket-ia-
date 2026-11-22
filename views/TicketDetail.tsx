@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
+import { formatMoney, formatPriceForInput } from '../utils/format';
 
 const UnitsStepper: React.FC<{
   value: number;
@@ -43,6 +44,39 @@ const UnitsStepper: React.FC<{
     </button>
   </div>
 );
+
+const PriceInput: React.FC<{
+  value: number;
+  onChange: (value: number) => void;
+  className?: string;
+}> = ({ value, onChange, className }) => {
+  const [text, setText] = useState(() => formatPriceForInput(value));
+  const [focused, setFocused] = useState(false);
+
+  // Mientras no se está editando, el texto sigue al valor guardado (coma decimal, sin ceros sobrantes)
+  useEffect(() => {
+    if (!focused) setText(formatPriceForInput(value));
+  }, [value, focused]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      value={text}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (!/^-?\d*([.,]\d{0,2})?$/.test(raw)) return; // solo números y como máximo 2 decimales
+        setText(raw.replace('.', ','));
+        const n = parseFloat(raw.replace(',', '.'));
+        onChange(Number.isFinite(n) ? n : 0);
+      }}
+      className={className}
+    />
+  );
+};
 
 interface TicketDetailProps {
   ticketId: string;
@@ -558,17 +592,17 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     if (!hasAssignedItems) return '';
     const sections: string[] = [
       `*${merchantDisplayName}*`,
-      `${ticket.date} · Total: ${ticket.totalAmount.toFixed(2)}€`,
+      `${ticket.date} · Total: ${formatMoney(ticket.totalAmount)}`,
     ];
 
     participantsWithItems.forEach((p) => {
       const items = Array.from(personAssignedItems[p.id]?.values() || []);
       const personLines = items.map(
         (item) =>
-          `  • ${item.description}${formatShareQuantity(item.num, item.den)} — ${item.amount.toFixed(2)}€`
+          `  • ${item.description}${formatShareQuantity(item.num, item.den)} — ${formatMoney(item.amount)}`
       );
-      const total = (userTotals[p.id] || 0).toFixed(2);
-      sections.push('', [`*${p.name} — ${total}€*`, ...personLines].join('\n'));
+      const total = formatMoney(userTotals[p.id] || 0);
+      sections.push('', [`*${p.name} — ${total}*`, ...personLines].join('\n'));
     });
 
     return `https://wa.me/?text=${encodeURIComponent(sections.join('\n'))}`;
@@ -690,7 +724,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Total Ticket (€)</label>
-                  <div className="text-2xl font-black text-gray-900 py-1">{ticket.totalAmount.toFixed(2)}€</div>
+                  <div className="text-2xl font-black text-gray-900 py-1">{formatMoney(ticket.totalAmount)}</div>
                 </div>
               </div>
             </div>
@@ -916,10 +950,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                       <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1.5 gap-2 ring-1 ring-gray-100">
                         <input type="number" value={line.quantity} onChange={(e) => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })} className="w-8 bg-transparent font-black text-xs text-center outline-none text-indigo-600" />
                         <span className="text-gray-400 text-[10px] font-bold">x</span>
-                        <div className="flex items-center"><input type="number" step="0.01" value={line.unitPrice} onChange={(e) => { if (!/^-?\d*([.,]\d{0,2})?$/.test(e.target.value)) return; updateLine(line.id, { unitPrice: parseFloat(e.target.value) || 0 }); }} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
+                        <div className="flex items-center"><PriceInput value={line.unitPrice} onChange={(v) => updateLine(line.id, { unitPrice: v })} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-black text-gray-900 text-base tabular-nums">{line.total.toFixed(2)}€</span>
+                        <span className="font-black text-gray-900 text-base tabular-nums">{formatMoney(line.total)}</span>
                         <button onClick={() => discardLine(line.id)} className="text-gray-400 hover:text-red-500 p-2 active-scale transition-colors bg-gray-100 rounded-lg"><ArchiveX size={16} /></button>
                       </div>
                     </div>
@@ -936,10 +970,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                     <div key={line.id} className="bg-gray-50/50 p-4 rounded-2xl border border-gray-200 flex items-center justify-between opacity-60 grayscale scale-[0.98] transition-all hover:opacity-80">
                       <div className="flex-1 min-w-0 mr-4">
                         <p className="font-bold text-gray-500 text-xs truncate line-through italic">{line.description}</p>
-                        <p className="text-[10px] text-gray-400 font-bold uppercase">{line.quantity} uds × {line.unitPrice}€</p>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="font-black text-gray-400 text-sm line-through tabular-nums">{line.total.toFixed(2)}€</span>
+                        <span className="font-black text-gray-400 text-sm line-through tabular-nums">{formatMoney(line.total)}</span>
                         <div className="flex items-center gap-1">
                           <button onClick={() => restoreLine(line.id)} className="bg-indigo-50 text-indigo-600 p-2 rounded-lg active-scale"><Undo2 size={16} /></button>
                           <button onClick={() => deletePermanently(line.id)} className="text-gray-300 hover:text-red-600 p-2 active-scale"><X size={16} /></button>
@@ -955,7 +989,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               <div className="p-5 rounded-3xl flex items-center justify-between shadow-2xl bg-indigo-600 text-white">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Total de la Cuenta</p>
-                  <p className="text-3xl font-black tabular-nums">{ticket.totalAmount.toFixed(2)}€</p>
+                  <p className="text-3xl font-black tabular-nums">{formatMoney(ticket.totalAmount)}</p>
                 </div>
                 <div className="text-right border-l border-white/20 pl-6">
                   <p className="text-[10px] font-black uppercase tracking-widest opacity-80">Productos</p>
@@ -1014,7 +1048,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                              <div className="flex items-center gap-2 max-w-[70%]">
                                <div>
                                  <h4 className={`font-black text-xs uppercase truncate ${isFullyAssigned ? 'opacity-80' : ''}`}>{line.description}</h4>
-                                 <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
+                                 <p className="text-[10px] opacity-70 font-bold">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
                                </div>
                              </div>
                              <div className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest shadow-inner flex items-center justify-center ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500 animate-pulse'}`}>
@@ -1070,13 +1104,13 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
           <div className="space-y-6 pb-20 animate-in fade-in duration-500">
             <div className={`rounded-[2rem] p-8 text-white shadow-2xl transition-colors duration-700 ${isRepartoCompleto ? 'bg-green-600' : 'bg-indigo-700'}`}>
               <p className="text-white/70 text-[10px] font-black uppercase tracking-[0.2em] mb-2 text-center">Resumen de Cuenta</p>
-              <h2 className="text-6xl font-black mb-6 tracking-tighter text-center tabular-nums">{totalRepartido.toFixed(2)}€</h2>
+              <h2 className="text-6xl font-black mb-6 tracking-tighter text-center tabular-nums">{formatMoney(totalRepartido)}</h2>
               <div className="h-4 bg-black/10 rounded-full overflow-hidden p-1">
                 <div className="h-full bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${Math.min(100, (totalRepartido / ticket.totalAmount) * 100)}%` }} />
               </div>
               <div className="mt-6 flex justify-between text-[11px] font-black uppercase tracking-widest opacity-80">
-                <span className="bg-black/20 px-3 py-1 rounded-full">TICKET: {ticket.totalAmount.toFixed(2)}€</span>
-                <span className={`px-3 py-1 rounded-full ${isRepartoCompleto ? 'bg-white/20' : 'bg-amber-500'}`}>{isRepartoCompleto ? 'TODO OK' : `REPARTIDO: ${totalRepartido.toFixed(2)}€`}</span>
+                <span className="bg-black/20 px-3 py-1 rounded-full">TICKET: {formatMoney(ticket.totalAmount)}</span>
+                <span className={`px-3 py-1 rounded-full ${isRepartoCompleto ? 'bg-white/20' : 'bg-amber-500'}`}>{isRepartoCompleto ? 'TODO OK' : `REPARTIDO: ${formatMoney(totalRepartido)}`}</span>
               </div>
             </div>
 
@@ -1111,7 +1145,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                         <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner">{p.name[0].toUpperCase()}</div>
                         <div><p className="font-black text-gray-900 text-xl tracking-tight leading-none mb-1">{p.name}</p><p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{share.toFixed(0)}% del reparto</p></div>
                       </div>
-                      <p className="text-3xl font-black text-gray-900 tracking-tighter tabular-nums">{amount.toFixed(2)}€</p>
+                      <p className="text-3xl font-black text-gray-900 tracking-tighter tabular-nums">{formatMoney(amount)}</p>
                     </button>
                   );
                 })}
@@ -1239,7 +1273,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                           <p className="font-black text-gray-900 text-sm uppercase truncate">{it.description}</p>
                           <p className="text-[11px] text-gray-400 font-bold">{formatShareText(it.num, it.den)} ud{it.num / it.den > 1 ? 's' : ''}</p>
                         </div>
-                        <p className="font-black text-gray-900 tabular-nums shrink-0">{it.amount.toFixed(2)}€</p>
+                        <p className="font-black text-gray-900 tabular-nums shrink-0">{formatMoney(it.amount)}</p>
                       </li>
                     ))}
                   </ul>
@@ -1247,7 +1281,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               </div>
               <div className="p-5 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total</span>
-                <span className="text-2xl font-black text-gray-900 tabular-nums">{total.toFixed(2)}€</span>
+                <span className="text-2xl font-black text-gray-900 tabular-nums">{formatMoney(total)}</span>
               </div>
             </div>
           </div>
@@ -1316,7 +1350,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                         autoComplete="off"
                         placeholder="0,00"
                         value={newLineModal.price}
-                        onChange={(e) => { if (!/^\d*([.,]\d{0,2})?$/.test(e.target.value)) return; setNewLineModal({ ...newLineModal, price: e.target.value }); }}
+                        onChange={(e) => { if (!/^\d*([.,]\d{0,2})?$/.test(e.target.value)) return; setNewLineModal({ ...newLineModal, price: e.target.value.replace('.', ',') }); }}
                         className="w-full min-w-0 bg-transparent py-3 text-sm font-bold text-gray-900 focus:outline-none"
                       />
                       <span className="text-gray-400 font-bold text-sm ml-1">€</span>
@@ -1326,7 +1360,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
 
                 <div className="flex items-center justify-between rounded-2xl bg-indigo-50 px-4 py-3">
                   <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Total</span>
-                  <span className="text-xl font-black text-indigo-900 tabular-nums">{lineTotal.toFixed(2)}€</span>
+                  <span className="text-xl font-black text-indigo-900 tabular-nums">{formatMoney(lineTotal)}</span>
                 </div>
               </div>
 
@@ -1372,7 +1406,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               <div className={`p-5 flex justify-between items-center text-white transition-colors ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
                 <div className="min-w-0 mr-3">
                   <h4 className="font-black text-sm uppercase truncate">{line.description}</h4>
-                  <p className="text-[11px] opacity-70 font-bold">{line.quantity} uds × {line.unitPrice}€</p>
+                  <p className="text-[11px] opacity-70 font-bold">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest ${isFullyAssigned ? 'bg-white/20' : 'bg-amber-500'}`}>

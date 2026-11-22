@@ -1,4 +1,5 @@
 import { Ticket } from '../types';
+import { formatAmount } from './format';
 
 /** Devuelve true si el reparto del ticket está completo (todo asignado, suma igual al total, y total > 0) */
 export function computeRepartoCompleto(ticket: Ticket): boolean {
@@ -98,7 +99,7 @@ export function buildShareText(ticket: Ticket): string {
 
   const sections: string[] = [
     `${merchantName}`,
-    `${ticket.date} - Total: ${ticket.totalAmount.toFixed(2)}EUR`,
+    `${ticket.date} - Total: ${formatAmount(ticket.totalAmount)}EUR`,
   ];
 
   ticket.participants.forEach((p) => {
@@ -106,9 +107,9 @@ export function buildShareText(ticket: Ticket): string {
     if (items.length === 0) return;
     const personLines = items.map(
       (item) =>
-        `  - ${item.description}${formatShareQuantity(item.num, item.den)} - ${item.amount.toFixed(2)}EUR`
+        `  - ${item.description}${formatShareQuantity(item.num, item.den)} - ${formatAmount(item.amount)}EUR`
     );
-    const total = (userTotals[p.id] || 0).toFixed(2);
+    const total = formatAmount(userTotals[p.id] || 0);
     sections.push('', [`${p.name} - ${total}EUR`, ...personLines].join('\n'));
   });
 

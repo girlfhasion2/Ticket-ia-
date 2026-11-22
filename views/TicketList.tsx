@@ -4,6 +4,7 @@ import { Ticket, Category, TicketSortConfig, TicketStatus } from '../types';
 import CategoryManagerModal from '../components/CategoryManagerModal';
 import SortTicketsModal from '../components/SortTicketsModal';
 import { computeRepartoCompleto, shareTicket } from '../utils/ticketShare';
+import { formatMoney } from '../utils/format';
 import {
   Calendar,
   Store,
@@ -594,10 +595,7 @@ const TicketList: React.FC<TicketListProps> = ({
           <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
             <div className="text-right">
               <span className="text-lg font-bold text-gray-900 tabular-nums block">
-                {ticket.totalAmount.toLocaleString('es-ES', {
-                  style: 'currency',
-                  currency: 'EUR',
-                })}
+                {formatMoney(ticket.totalAmount)}
               </span>
               {getStatusBadge(ticket.status)}
             </div>
