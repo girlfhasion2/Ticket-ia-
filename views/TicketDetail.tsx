@@ -5,7 +5,7 @@ import { parseTicketImage } from '../geminiService';
 import {
   ArrowLeft, Camera, Images, Trash2, Plus, Users,
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
-  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check
+  Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check, Download
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import { prepareReceiptImage } from '../utils/imageUtils';
@@ -231,6 +231,41 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
       await processImageSource(file);
+    }
+  };
+
+  const saveImageToDevice = async () => {
+    if (!ticket.imageBase64) return;
+    try {
+      const blob = await (await fetch(ticket.imageBase64)).blob();
+      const baseName = (ticket.merchant || 'ticket')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase() || 'ticket';
+      const fileName = `${baseName}-${ticket.date || 'foto'}.jpg`;
+      const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+
+      // Hoja de compartir del sistema (permite "Guardar imagen" en la galería)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        return;
+      }
+
+      // Alternativa: descarga normal
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return; // el usuario cerró la hoja de compartir
+      console.error('Error al guardar la imagen', error);
+      setOcrError('No se pudo guardar la foto en el dispositivo.');
     }
   };
 
@@ -766,6 +801,15 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   >
                     <Sparkles size={16} className="text-indigo-600" />
                     Re-escanear ticket con IA
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={saveImageToDevice}
+                    className="w-full py-3 px-4 rounded-2xl bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-2 active-scale transition-colors"
+                  >
+                    <Download size={16} className="text-indigo-600" />
+                    Guardar foto en el dispositivo
                   </button>
                 </div>
               ) : (
