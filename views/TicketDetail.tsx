@@ -1243,14 +1243,14 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         const total = userTotals[person.id] || 0;
         return (
           <div
-            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={() => setPersonDetailModal(null)}
           >
             <div
-              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+              className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[calc(100%-2rem)] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
-              <div className="p-5 flex justify-between items-center text-white bg-indigo-900">
+              <div className="px-4 py-3 flex justify-between items-center text-white bg-indigo-900">
                 <div className="min-w-0 mr-3">
                   <h4 className="font-black text-lg truncate">{person.name}</h4>
                   <p className="text-[11px] opacity-70 font-bold uppercase tracking-widest">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
@@ -1263,9 +1263,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   <X size={18} />
                 </button>
               </div>
-              <div className="p-4 overflow-y-auto flex-1">
+              <div className="px-4 py-2 overflow-y-auto flex-1">
                 {items.length === 0 ? (
-                  <p className="text-center py-10 text-gray-400 font-bold text-sm">Sin productos asignados</p>
+                  <p className="text-center py-6 text-gray-400 font-bold text-sm">Sin productos asignados</p>
                 ) : (
                   <ul className="divide-y divide-gray-100">
                     {items.map((it, i) => (
@@ -1280,7 +1280,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   </ul>
                 )}
               </div>
-              <div className="p-5 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+              <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Total</span>
                 <span className="text-2xl font-black text-gray-900 tabular-nums">{formatMoney(total)}</span>
               </div>
@@ -1400,15 +1400,15 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
         const isFullyAssigned = pendingUnits <= 0;
         return (
           <div
-            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+            className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
             onClick={() => setPendingLineModal(null)}
           >
             <div
-              className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+              className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden max-h-[calc(100%-2rem)] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               {/* Cabecera del producto */}
-              <div className={`p-5 flex justify-between items-center text-white transition-colors ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
+              <div className={`px-4 py-3 flex justify-between items-center text-white transition-colors ${isFullyAssigned ? 'bg-green-600' : 'bg-indigo-900'}`}>
                 <div className="min-w-0 mr-3">
                   <h4 className="font-black text-sm uppercase truncate">{line.description}</h4>
                   <p className="text-[11px] opacity-70 font-bold">{line.quantity} uds × {formatMoney(line.unitPrice)}</p>
@@ -1428,16 +1428,16 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               </div>
 
               {/* Cuerpo con los grupos de reparto */}
-              <div className="overflow-y-auto flex-1 p-4 space-y-4 bg-gray-50/40">
+              <div className="overflow-y-auto flex-1 p-3 space-y-3 bg-gray-50/40">
                 {ticket.participants.length === 0 ? (
-                  <div className="text-center py-10">
+                  <div className="text-center py-4">
                     <p className="text-gray-500 text-sm font-bold">Añade participantes en la pestaña General primero.</p>
                   </div>
                 ) : (
                   <>
                     {line.assignments.map(asgn => (
-                      <div key={asgn.id} className={`p-4 border rounded-2xl shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
-                        <div className="flex items-center justify-between mb-4">
+                      <div key={asgn.id} className={`p-3 border rounded-2xl shadow-sm ${asgn.personIds.length > 0 ? 'bg-white border-gray-100' : 'bg-amber-50/50 border-amber-100'}`}>
+                        <div className="flex items-center justify-between mb-3">
                           <div className="flex flex-col">
                             <span className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">Unidades</span>
                             <UnitsStepper
@@ -1477,7 +1477,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                     {unitsAssigned < line.quantity && (
                       <button
                         onClick={() => addAssignment(line.id)}
-                        className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-4 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
+                        className="w-full border-2 border-dashed border-indigo-100 bg-white/80 rounded-2xl py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest active-scale"
                       >
                         + NUEVO GRUPO DE REPARTO
                       </button>
@@ -1488,11 +1488,11 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               </div>
 
               {/* Footer */}
-              <div className="p-4 border-t border-gray-100">
+              <div className="p-3 border-t border-gray-100">
                 <button
                   type="button"
                   onClick={() => setPendingLineModal(null)}
-                  className="w-full py-3.5 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest active-scale"
+                  className="w-full py-3 rounded-2xl bg-indigo-600 text-white font-black text-xs uppercase tracking-widest active-scale"
                 >
                   Listo
                 </button>
