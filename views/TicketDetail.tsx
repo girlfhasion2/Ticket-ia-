@@ -950,7 +950,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                return (
                  <>
                    {/* Chips de filtro */}
-                   <div className="sticky top-0 z-10 -mx-4 -mt-4 flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
+                   <div className="sticky -top-4 z-10 -mx-4 -mt-4 flex gap-2 px-4 py-3 bg-gray-50 border-b border-gray-100">
                      <button
                        onClick={() => setSplitFilter('all')}
                        className={`px-4 py-1.5 rounded-full text-[11px] font-black border transition-all ${splitFilter === 'all' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-500 border-gray-200'}`}
