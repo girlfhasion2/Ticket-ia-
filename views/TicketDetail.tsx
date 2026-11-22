@@ -916,7 +916,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                       <div className="flex items-center bg-gray-50 rounded-lg px-2 py-1.5 gap-2 ring-1 ring-gray-100">
                         <input type="number" value={line.quantity} onChange={(e) => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })} className="w-8 bg-transparent font-black text-xs text-center outline-none text-indigo-600" />
                         <span className="text-gray-400 text-[10px] font-bold">x</span>
-                        <div className="flex items-center"><input type="number" step="0.01" value={line.unitPrice} onChange={(e) => updateLine(line.id, { unitPrice: parseFloat(e.target.value) || 0 })} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
+                        <div className="flex items-center"><input type="number" step="0.01" value={line.unitPrice} onChange={(e) => { if (!/^-?\d*([.,]\d{0,2})?$/.test(e.target.value)) return; updateLine(line.id, { unitPrice: parseFloat(e.target.value) || 0 }); }} className="w-14 bg-transparent font-black text-xs text-gray-600 outline-none text-right" /><span className="text-[10px] font-bold text-gray-400 ml-0.5">€</span></div>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-black text-gray-900 text-base tabular-nums">{line.total.toFixed(2)}€</span>
@@ -1316,7 +1316,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                         autoComplete="off"
                         placeholder="0,00"
                         value={newLineModal.price}
-                        onChange={(e) => setNewLineModal({ ...newLineModal, price: e.target.value })}
+                        onChange={(e) => { if (!/^\d*([.,]\d{0,2})?$/.test(e.target.value)) return; setNewLineModal({ ...newLineModal, price: e.target.value }); }}
                         className="w-full min-w-0 bg-transparent py-3 text-sm font-bold text-gray-900 focus:outline-none"
                       />
                       <span className="text-gray-400 font-bold text-sm ml-1">€</span>
