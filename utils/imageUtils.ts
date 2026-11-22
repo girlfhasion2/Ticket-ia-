@@ -1,3 +1,6 @@
+// ~1,3 MB de imagen una vez codificada en base64.
+const MAX_DATA_URL_CHARS = 1_800_000;
+
 const readFileAsDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -42,22 +45,44 @@ export async function prepareReceiptImage(
     const targetHeight = Math.round(naturalHeight * scale);
 
     const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       throw new Error("No se pudo inicializar el lienzo de imagen.");
     }
 
-    // White background prevents transparent PNGs from turning black in JPEG
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, targetWidth, targetHeight);
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+    const render = (w: number, h: number, q: number) => {
+      canvas.width = w;
+      canvas.height = h;
+      // White background prevents transparent PNGs from turning black in JPEG
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      return canvas.toDataURL("image/jpeg", q);
+    };
 
-    return canvas.toDataURL("image/jpeg", quality);
+    // Se garantiza un tamaño razonable: la plataforma rechaza peticiones de más de ~4,5 MB
+    // y en móvil las fotos de cámara son muy pesadas.
+    let w = targetWidth;
+    let h = targetHeight;
+    let q = quality;
+    let out = render(w, h, q);
+    for (let i = 0; i < 6 && out.length > MAX_DATA_URL_CHARS; i++) {
+      if (q > 0.61) {
+        q = Math.max(0.6, q - 0.1);
+      } else {
+        w = Math.round(w * 0.8);
+        h = Math.round(h * 0.8);
+      }
+      out = render(w, h, q);
+    }
+    return out;
   } catch (err) {
     if (typeof source !== "string") {
+      if (source.size > 3 * 1024 * 1024) {
+        throw new Error(
+          "No se pudo reducir la foto para enviarla. Prueba a hacerla de nuevo o elige otra imagen."
+        );
+      }
       return readFileAsDataUrl(source);
     }
     throw err;
