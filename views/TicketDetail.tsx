@@ -1257,95 +1257,100 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                  <>
                    {/* Cabecera fija: conmutador, selector de persona (modo persona) y chips de filtro */}
                    <div className="sticky -top-4 z-10 -mx-4 -mt-4 px-4 py-3 bg-gray-50 border-b border-gray-100 space-y-2.5">
-                     <div className="grid grid-cols-2 gap-1 p-1 bg-gray-200 rounded-2xl">
-                       <button
-                         type="button"
-                         onClick={() => handleChangeSplitMode('by-product')}
-                         className={`min-h-[44px] px-3 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                           splitMode === 'by-product'
-                             ? 'bg-white text-indigo-600 shadow-sm'
-                             : 'text-gray-500 hover:text-gray-700'
+                     {/* Fila: conmutador Por producto | Por persona y, en modo persona, el selector de persona al lado */}
+                     <div className="relative flex items-stretch gap-2" ref={personPickerRef}>
+                       <div
+                         className={`grid grid-cols-2 gap-1 p-1 bg-gray-200 rounded-2xl ${
+                           splitMode === 'by-person' ? 'shrink-0' : 'flex-1'
                          }`}
                        >
-                         Por producto
-                       </button>
-                       <button
-                         type="button"
-                         onClick={() => handleChangeSplitMode('by-person')}
-                         className={`min-h-[44px] px-3 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${
-                           splitMode === 'by-person'
-                             ? 'bg-white text-indigo-600 shadow-sm'
-                             : 'text-gray-500 hover:text-gray-700'
-                         }`}
-                       >
-                         Por persona
-                       </button>
-                     </div>
+                         <button
+                           type="button"
+                           onClick={() => handleChangeSplitMode('by-product')}
+                           className={`min-h-[44px] px-2.5 sm:px-3 rounded-xl text-[11px] font-black whitespace-nowrap normal-case sm:uppercase tracking-normal sm:tracking-wider transition-all ${
+                             splitMode === 'by-product'
+                               ? 'bg-white text-indigo-600 shadow-sm'
+                               : 'text-gray-500 hover:text-gray-700'
+                           }`}
+                         >
+                           Por producto
+                         </button>
+                         <button
+                           type="button"
+                           onClick={() => handleChangeSplitMode('by-person')}
+                           className={`min-h-[44px] px-2.5 sm:px-3 rounded-xl text-[11px] font-black whitespace-nowrap normal-case sm:uppercase tracking-normal sm:tracking-wider transition-all ${
+                             splitMode === 'by-person'
+                               ? 'bg-white text-indigo-600 shadow-sm'
+                               : 'text-gray-500 hover:text-gray-700'
+                           }`}
+                         >
+                           Por persona
+                         </button>
+                       </div>
 
-                     {splitMode === 'by-person' && (
-                       <div className="relative" ref={personPickerRef}>
+                       {splitMode === 'by-person' && (
                          <button
                            type="button"
                            aria-expanded={isPersonPickerOpen}
                            aria-label={`Persona seleccionada: ${activePerson.name}, ${formatMoney(userTotals[activePerson.id] || 0)}`}
                            onClick={() => setIsPersonPickerOpen(prev => !prev)}
-                           className="w-full min-h-[48px] px-3.5 py-2 rounded-2xl bg-white border border-gray-200 hover:border-indigo-200 shadow-sm flex items-center justify-between gap-3 active-scale transition-colors"
+                           className="flex-1 min-w-0 min-h-[52px] px-3 rounded-2xl bg-white border border-gray-200 hover:border-indigo-200 shadow-sm flex items-center justify-between gap-2 active-scale transition-colors"
                          >
                            <div className="flex items-center gap-2.5 min-w-0">
-                             <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 font-black text-sm flex items-center justify-center shrink-0">
+                             <div className="hidden sm:flex w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 font-black text-sm items-center justify-center shrink-0">
                                {activePerson.name.charAt(0).toUpperCase()}
                              </div>
                              <span className="font-black text-sm text-gray-900 truncate">
                                {activePerson.name}
                              </span>
                            </div>
-                           <div className="flex items-center gap-2 shrink-0">
-                             <span className="text-base font-black text-indigo-600 tabular-nums">
+                           <div className="flex items-center gap-1.5 shrink-0">
+                             <span className="text-sm sm:text-base font-black text-indigo-600 tabular-nums">
                                {formatMoney(userTotals[activePerson.id] || 0)}
                              </span>
                              <ChevronDown
-                               size={18}
+                               size={16}
                                className={`text-gray-400 transition-transform duration-200 ${
                                  isPersonPickerOpen ? 'rotate-180 text-indigo-600' : ''
                                }`}
                              />
                            </div>
                          </button>
+                       )}
 
-                         {isPersonPickerOpen && (
-                           <div className="absolute left-0 right-0 top-full mt-2 z-30 bg-white border border-gray-200 rounded-2xl shadow-xl p-2.5 max-h-[45vh] overflow-y-auto">
-                             <div className="grid grid-cols-2 gap-2">
-                               {ticket.participants.map(p => {
-                                 const isSelected = p.id === activePerson.id;
-                                 return (
-                                   <button
-                                     key={p.id}
-                                     type="button"
-                                     onClick={() => handleSelectPerson(p.id)}
-                                     className={`min-h-[44px] px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-1.5 transition-all active-scale ${
-                                       isSelected
-                                         ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
-                                         : 'bg-gray-50 border-gray-100 text-gray-800 hover:border-indigo-200'
+                       {splitMode === 'by-person' && isPersonPickerOpen && (
+                         <div className="absolute left-0 right-0 top-full mt-2 z-30 bg-white border border-gray-200 rounded-2xl shadow-xl p-2.5 max-h-[45vh] overflow-y-auto">
+                           <div className="grid grid-cols-2 gap-2">
+                             {ticket.participants.map(p => {
+                               const isSelected = p.id === activePerson.id;
+                               return (
+                                 <button
+                                   key={p.id}
+                                   type="button"
+                                   onClick={() => handleSelectPerson(p.id)}
+                                   className={`min-h-[44px] px-3 py-2 rounded-xl border text-left flex items-center justify-between gap-1.5 transition-all active-scale ${
+                                     isSelected
+                                       ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                       : 'bg-gray-50 border-gray-100 text-gray-800 hover:border-indigo-200'
+                                   }`}
+                                 >
+                                   <span className="text-xs font-bold truncate min-w-0">
+                                     {p.name}
+                                   </span>
+                                   <span
+                                     className={`text-xs font-black tabular-nums shrink-0 ${
+                                       isSelected ? 'text-white' : 'text-indigo-600'
                                      }`}
                                    >
-                                     <span className="text-xs font-bold truncate min-w-0">
-                                       {p.name}
-                                     </span>
-                                     <span
-                                       className={`text-xs font-black tabular-nums shrink-0 ${
-                                         isSelected ? 'text-white' : 'text-indigo-600'
-                                       }`}
-                                     >
-                                       {formatMoney(userTotals[p.id] || 0)}
-                                     </span>
-                                   </button>
-                                 );
-                               })}
-                             </div>
+                                     {formatMoney(userTotals[p.id] || 0)}
+                                   </span>
+                                 </button>
+                               );
+                             })}
                            </div>
-                         )}
-                       </div>
-                     )}
+                         </div>
+                       )}
+                     </div>
 
                      {/* Chips de filtro */}
                      <div className="flex flex-wrap gap-2">
