@@ -50,6 +50,6 @@ export interface TicketSortConfig {
 }
 
 export interface AppState {
-  view: 'list' | 'detail' | 'people' | 'settings' | 'friends';
+  view: 'list' | 'detail' | 'people' | 'settings' | 'friends' | 'shared';
   selectedTicketId?: string;
 }

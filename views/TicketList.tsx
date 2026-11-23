@@ -3,6 +3,7 @@ import { db } from '../db';
 import { Ticket, Category, TicketSortConfig, TicketStatus } from '../types';
 import CategoryManagerModal from '../components/CategoryManagerModal';
 import SortTicketsModal from '../components/SortTicketsModal';
+import SharedTicketsSection from '../components/SharedTicketsSection';
 import { computeRepartoCompleto, shareTicket } from '../utils/ticketShare';
 import { formatMoney } from '../utils/format';
 import {
@@ -30,6 +31,7 @@ import { es } from 'date-fns/locale';
 
 interface TicketListProps {
   onSelectTicket: (id: string) => void;
+  onOpenShared?: (id: string) => void;
   onCreateTicket: () => void;
   onSelectionModeChange?: (active: boolean) => void;
   sortConfig?: TicketSortConfig;
@@ -185,6 +187,7 @@ function getMatchedPills(ticket: Ticket, tokens: string[]): MatchPill[] {
 
 const TicketList: React.FC<TicketListProps> = ({
   onSelectTicket,
+  onOpenShared,
   onCreateTicket,
   onSelectionModeChange,
   sortConfig: controlledSortConfig,
@@ -844,6 +847,10 @@ const TicketList: React.FC<TicketListProps> = ({
           </>
         )}
       </header>
+
+      {!selectionMode && !hasSearch && onOpenShared && (
+        <SharedTicketsSection onOpen={onOpenShared} />
+      )}
 
       {/* Fila horizontal de chips de categorías */}
       <div className="mb-5">

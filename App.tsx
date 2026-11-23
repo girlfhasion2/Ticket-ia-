@@ -6,6 +6,9 @@ import TicketList from './views/TicketList';
 import TicketDetail from './views/TicketDetail';
 import Settings from './views/Settings';
 import Friends from './views/Friends';
+import SharedTicketView from './views/SharedTicketView';
+import JoinInvite from './views/JoinInvite';
+import { pendingInvite } from './sharingService';
 import { friendsService } from './friendsService';
 import Auth from './views/Auth';
 import ResetPassword from './views/ResetPassword';
@@ -38,6 +41,23 @@ const App: React.FC = () => {
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
+  const [selectedSharedId, setSelectedSharedId] = useState<string | undefined>();
+  const [inviteToken, setInviteToken] = useState<string | null>(() => {
+    // Un enlace de invitación llega como ?invite=TOKEN. Se guarda para sobrevivir al inicio de sesión.
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('invite');
+    if (fromUrl) {
+      pendingInvite.set(fromUrl);
+      params.delete('invite');
+      const rest = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash
+      );
+    }
+    return pendingInvite.get();
+  });
 
   useEffect(() => {
     const onHashChange = () => {
@@ -89,6 +109,7 @@ const App: React.FC = () => {
       setIsListSelectionMode(false);
       setSortConfig({ field: 'date', direction: 'desc' });
       setSearchQuery('');
+      setSelectedSharedId(undefined);
     }
   }, [user]);
 
@@ -162,8 +183,35 @@ const App: React.FC = () => {
   if (!user) {
     return (
       <div className="flex flex-col h-screen max-w-2xl mx-auto bg-gray-50 shadow-xl overflow-y-auto">
+        {inviteToken && (
+          <div className="m-4 mb-0 bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-2xl px-4 py-3 text-xs font-bold">
+            Te han invitado a un ticket. Inicia sesión o crea una cuenta para unirte.
+          </div>
+        )}
         <Auth />
       </div>
+    );
+  }
+
+  if (inviteToken) {
+    const finishInvite = () => {
+      pendingInvite.clear();
+      setInviteToken(null);
+    };
+    return (
+      <JoinInvite
+        token={inviteToken}
+        onJoined={(ticketId) => {
+          finishInvite();
+          setSelectedSharedId(ticketId);
+          setView('shared');
+        }}
+        onOpenOwn={(ticketId) => {
+          finishInvite();
+          navigateToTicket(ticketId);
+        }}
+        onCancel={finishInvite}
+      />
     );
   }
 
@@ -173,6 +221,10 @@ const App: React.FC = () => {
         return (
           <TicketList
             onSelectTicket={navigateToTicket}
+            onOpenShared={(id) => {
+              setSelectedSharedId(id);
+              setView('shared');
+            }}
             onCreateTicket={createNewTicket}
             onSelectionModeChange={setIsListSelectionMode}
             sortConfig={sortConfig}
@@ -193,6 +245,16 @@ const App: React.FC = () => {
             }}
           />
         ) : null;
+      case 'shared':
+        return selectedSharedId ? (
+          <SharedTicketView
+            ticketId={selectedSharedId}
+            onBack={() => {
+              setSelectedSharedId(undefined);
+              setView('list');
+            }}
+          />
+        ) : null;
       case 'friends':
         return <Friends onPendingCountChange={setPendingFriendRequests} />;
       case 'settings':
@@ -201,6 +263,10 @@ const App: React.FC = () => {
         return (
           <TicketList
             onSelectTicket={navigateToTicket}
+            onOpenShared={(id) => {
+              setSelectedSharedId(id);
+              setView('shared');
+            }}
             onCreateTicket={createNewTicket}
             onSelectionModeChange={setIsListSelectionMode}
             sortConfig={sortConfig}
@@ -218,7 +284,7 @@ const App: React.FC = () => {
         {renderView()}
       </main>
 
-      {view !== 'detail' && !(view === 'list' && isListSelectionMode) && (
+      {view !== 'detail' && view !== 'shared' && !(view === 'list' && isListSelectionMode) && (
         <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-6 py-3 flex justify-around items-center z-50">
           <button 
             onClick={() => setView('list')}

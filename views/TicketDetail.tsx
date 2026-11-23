@@ -9,6 +9,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
+import TicketSharePanel from '../components/TicketSharePanel';
 import { prepareReceiptImage } from '../utils/imageUtils';
 import { formatMoney, formatPriceForInput } from '../utils/format';
 
@@ -980,6 +981,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                 <button onClick={() => addLocalParticipant(newParticipantName)} className="bg-indigo-600 text-white px-5 rounded-xl active-scale shadow-md"><Plus size={24} /></button>
               </div>
             </div>
+
+            {(ticket.participants.length > 0 || ticket.lines.length > 0) && (
+              <TicketSharePanel ticketId={ticket.id} participants={ticket.participants} />
+            )}
 
             <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
