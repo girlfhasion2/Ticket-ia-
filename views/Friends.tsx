@@ -28,6 +28,11 @@ import {
 } from '../friendsService';
 import { sharingService, OwnedSharedTicket, SharedTicket } from '../sharingService';
 import {
+  notificationsService,
+  needsAttention,
+  AppNotification,
+} from '../notificationsService';
+import {
   buildBalances,
   isOpen,
   sumOpen,
@@ -44,6 +49,8 @@ type Filter = 'all' | 'owed' | 'owe';
 interface FriendsProps {
   /** Avisa a la app de lo que requiere tu atención (solicitudes y pagos por confirmar). */
   onPendingCountChange?: (count: number) => void;
+  /** Abre un ticket que han compartido contigo. */
+  onOpenShared?: (ticketId: string) => void;
 }
 
 /** Una persona con la que tengo trato: un amigo, o alguien que solo comparte tickets. */
@@ -56,7 +63,6 @@ interface Person {
 }
 
 const REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const REMINDER_VISIBLE_MS = 14 * 24 * 60 * 60 * 1000;
 
 const shortDate = (iso?: string | null): string => {
   if (!iso) return '';
@@ -112,7 +118,7 @@ function summarize(
   return { text: 'Al día', kind: 'neutral' };
 }
 
-const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
+const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared }) => {
   const [screen, setScreen] = useState<Screen>('list');
   const [tab, setTab] = useState<Tab>('friends');
   const [filter, setFilter] = useState<Filter>('all');
@@ -120,6 +126,8 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [owned, setOwned] = useState<OwnedSharedTicket[]>([]);
   const [shared, setShared] = useState<SharedTicket[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notifError, setNotifError] = useState<string | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -178,23 +186,7 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const incoming = requests.filter((r) => r.direction === 'incoming');
   const outgoing = requests.filter((r) => r.direction === 'outgoing');
 
-  const claims: { person: Person; entry: BalanceEntry }[] = [];
-  const reminders: { person: Person; entry: BalanceEntry }[] = [];
-  const now = Date.now();
-  people.forEach((p) => {
-    p.entries.forEach((e) => {
-      if (e.direction === 'theyOwe' && e.status === 'sent') claims.push({ person: p, entry: e });
-      if (
-        e.direction === 'iOwe' &&
-        e.status !== 'confirmed' &&
-        e.lastReminderAt &&
-        now - new Date(e.lastReminderAt).getTime() < REMINDER_VISIBLE_MS
-      ) {
-        reminders.push({ person: p, entry: e });
-      }
-    });
-  });
-  const attentionCount = incoming.length + claims.length;
+  const attentionCount = notifications.filter(needsAttention).length;
 
   const reload = useCallback(async () => {
     try {
@@ -214,11 +206,15 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
       setOwned(ow);
       setShared(sh);
       setError(null);
-      const claimCount = ow.reduce(
-        (n, t) => n + t.members.filter((m) => m.participantId && m.status === 'sent').length,
-        0
-      );
-      onPendingCountChange?.(rq.filter((r) => r.direction === 'incoming').length + claimCount);
+      let notifs: AppNotification[] = [];
+      try {
+        notifs = await notificationsService.list();
+        setNotifError(null);
+      } catch (e: any) {
+        setNotifError(e?.message || 'No se pudo cargar el buzón.');
+      }
+      setNotifications(notifs);
+      onPendingCountChange?.(notifs.filter(needsAttention).length);
     } catch (e: any) {
       setError(e?.message || 'No se pudieron cargar tus amigos.');
     } finally {
@@ -328,6 +324,41 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
       setBusy(false);
     }
   };
+
+  // ----- Avisos -----
+  const markRead = async (n: AppNotification) => {
+    if (n.readAt) return;
+    setNotifications((list) =>
+      list.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
+    );
+    try {
+      await notificationsService.markRead(n.id);
+      onPendingCountChange?.(
+        notifications
+          .map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
+          .filter(needsAttention).length
+      );
+    } catch {
+      /* se corrige en la siguiente carga */
+    }
+  };
+
+  const markAllRead = () =>
+    run(() => notificationsService.markAllRead(), 'Todo marcado como leído');
+
+  /** Persona (amigo o no) que provocó un aviso, con tu apodo si lo hay. */
+  const nameOf = (n: AppNotification): string => {
+    const f = n.actorId ? friends.find((x) => x.friendId === n.actorId) : undefined;
+    return f ? friendLabel(f) : n.actorName;
+  };
+
+  const entryFor = (n: AppNotification): BalanceEntry | undefined =>
+    n.actorId && n.ticketId
+      ? balances.get(n.actorId)?.entries.find((e) => e.ticketId === n.ticketId)
+      : undefined;
+
+  const personById = (id: string | null): Person | undefined =>
+    id ? people.find((p) => p.userId === id) : undefined;
 
   // ----- Añadir amigo -----
   const sendEmail = async () => {
@@ -917,95 +948,207 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
 
         {!loading && !error && tab === 'inbox' && (
           <>
-            {incoming.length === 0 &&
-              outgoing.length === 0 &&
-              claims.length === 0 &&
-              reminders.length === 0 && (
-                <div className="text-center py-12 text-sm font-bold text-gray-400">
-                  No tienes avisos pendientes
-                </div>
-              )}
-
-            {incoming.map((r) => (
-              <div key={r.id} className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4">
-                <div className="flex justify-between items-start gap-2">
-                  <div className="text-sm font-black text-gray-900">
-                    {r.displayName || 'Alguien'} quiere ser tu amigo
-                  </div>
-                  <div className="text-[10px] font-bold text-gray-400 whitespace-nowrap">
-                    {shortDate(r.createdAt)}
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() =>
-                      run(() => friendsService.respondToRequest(r.id, true), 'Solicitud aceptada')
-                    }
-                    disabled={busy}
-                    className="flex-1 bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-                  >
-                    Aceptar
-                  </button>
-                  <button
-                    onClick={() =>
-                      run(() => friendsService.respondToRequest(r.id, false), 'Solicitud rechazada')
-                    }
-                    disabled={busy}
-                    className="flex-1 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-                  >
-                    Rechazar
-                  </button>
-                </div>
+            {notifError && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl p-4 text-xs font-bold flex gap-2">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                {notifError}
               </div>
-            ))}
+            )}
 
-            {claims.map(({ person, entry }) => (
-              <div key={`c-${entry.ticketId}-${person.userId}`} className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                <div className="text-sm font-black text-gray-900">
-                  {person.name} dice que te ha pagado
-                </div>
-                <div className="text-xs font-semibold text-gray-600 mt-1">
-                  {formatMoney(entry.amount)} del ticket «{entry.merchant}». Confírmalo cuando lo hayas
-                  recibido.
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => confirmEntry(person, entry)}
-                    disabled={busy}
-                    className="flex-1 bg-green-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-                  >
-                    Confirmar
-                  </button>
-                  <button
-                    onClick={() => reopenEntry(person, entry)}
-                    disabled={busy}
-                    className="flex-1 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-                  >
-                    No lo he recibido
-                  </button>
-                </div>
-              </div>
-            ))}
-
-            {reminders.map(({ person, entry }) => (
-              <div key={`r-${entry.ticketId}-${person.userId}`} className="bg-white border border-gray-100 rounded-2xl p-4">
-                <div className="flex justify-between items-start gap-2">
-                  <div className="text-sm font-black text-gray-900">Recordatorio de {person.name}</div>
-                  <div className="text-[10px] font-bold text-gray-400 whitespace-nowrap">
-                    {shortDate(entry.lastReminderAt)}
-                  </div>
-                </div>
-                <div className="text-xs font-semibold text-gray-600 mt-1">
-                  Te recuerda {formatMoney(entry.amount)} del ticket «{entry.merchant}».
-                </div>
+            {notifications.some((n) => !n.readAt) && (
+              <div className="flex justify-end">
                 <button
-                  onClick={() => openPerson(person)}
-                  className="mt-3 text-[11px] font-black uppercase tracking-widest text-indigo-700 border border-gray-200 rounded-xl px-4 py-2.5"
+                  onClick={markAllRead}
+                  disabled={busy}
+                  className="text-[11px] font-black uppercase tracking-widest text-indigo-700 py-1"
                 >
-                  Ver
+                  Marcar todo como leído
                 </button>
               </div>
-            ))}
+            )}
+
+            {!notifError && notifications.length === 0 && outgoing.length === 0 && (
+              <div className="text-center py-12 text-sm font-bold text-gray-400">
+                No tienes avisos todavía
+              </div>
+            )}
+
+            {notifications.map((n) => {
+              const unread = !n.readAt;
+              const who = nameOf(n);
+              const entry = entryFor(n);
+              const amount = entry ? formatMoney(entry.amount) : null;
+              const actor = personById(n.actorId);
+              const merchant = n.merchant || 'Ticket sin nombre';
+
+              let title = '';
+              let body = '';
+              switch (n.type) {
+                case 'friend_request':
+                  title = `${who} quiere ser tu amigo`;
+                  break;
+                case 'friend_accepted':
+                  title = `${who} ha aceptado tu solicitud`;
+                  body = 'Ya sois amigos.';
+                  break;
+                case 'added_to_ticket':
+                  title = `${who} te ha añadido a «${merchant}»`;
+                  body = 'Ya puedes ver el reparto y lo que te toca pagar.';
+                  break;
+                case 'member_joined':
+                  title = `${who} se ha unido a «${merchant}»`;
+                  body = 'Entró con tu enlace de invitación.';
+                  break;
+                case 'payment_sent':
+                  title = `${who} dice que te ha pagado`;
+                  body = `${amount ? `${amount} del ticket` : 'Del ticket'} «${merchant}». Confírmalo cuando lo hayas recibido.`;
+                  break;
+                case 'payment_confirmed':
+                  title = `${who} ha confirmado tu pago`;
+                  body = `Ticket «${merchant}». Queda como pagado.`;
+                  break;
+                case 'payment_reopened':
+                  title = `${who} dice que no ha recibido tu pago`;
+                  body = `Ticket «${merchant}». Vuelve a estar pendiente.`;
+                  break;
+                case 'payment_reminder':
+                  title = `Recordatorio de ${who}`;
+                  body = `${amount ? `Te recuerda ${amount} del` : 'Te recuerda tu parte del'} ticket «${merchant}».`;
+                  break;
+              }
+
+              const resolvedLabel: Record<string, string> = {
+                accepted: 'Aceptada',
+                rejected: n.type === 'payment_sent' ? 'Marcado como no recibido' : 'Rechazada',
+                confirmed: 'Confirmado · cobrado',
+                undone: `${who} deshizo el envío`,
+              };
+
+              const canViewTicket =
+                !!onOpenShared &&
+                !!n.ticketId &&
+                (n.type === 'added_to_ticket' || n.type === 'payment_reminder' ||
+                  n.type === 'payment_confirmed' || n.type === 'payment_reopened');
+
+              return (
+                <div
+                  key={n.id}
+                  className={`rounded-2xl p-4 border ${
+                    unread ? 'bg-indigo-50/70 border-indigo-100' : 'bg-white border-gray-100'
+                  }`}
+                >
+                  <div onClick={() => markRead(n)} className="cursor-pointer">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        {unread && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 mt-1 shrink-0" aria-label="Sin leer" />
+                        )}
+                        <div className={`text-sm text-gray-900 ${unread ? 'font-black' : 'font-semibold'}`}>
+                          {title}
+                        </div>
+                      </div>
+                      <div className="text-[10px] font-bold text-gray-400 whitespace-nowrap">
+                        {shortDate(n.createdAt)}
+                      </div>
+                    </div>
+                    {body && (
+                      <div
+                        className={`text-xs mt-1 ${
+                          unread ? 'font-semibold text-gray-600' : 'font-medium text-gray-400'
+                        } ${unread ? 'ml-[18px]' : ''}`}
+                      >
+                        {body}
+                      </div>
+                    )}
+                  </div>
+
+                  {n.type === 'friend_request' && n.resolved === null && n.friendshipId && (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() =>
+                          run(() => friendsService.respondToRequest(n.friendshipId!, true), 'Solicitud aceptada')
+                        }
+                        disabled={busy}
+                        className="flex-1 bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                      >
+                        Aceptar
+                      </button>
+                      <button
+                        onClick={() =>
+                          run(() => friendsService.respondToRequest(n.friendshipId!, false), 'Solicitud rechazada')
+                        }
+                        disabled={busy}
+                        className="flex-1 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  )}
+
+                  {n.type === 'payment_sent' && n.resolved === null && n.actorId && n.ticketId && (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() =>
+                          run(
+                            () => sharingService.confirmPayment(n.ticketId!, n.actorId!),
+                            'Pago confirmado. Queda como cobrado'
+                          )
+                        }
+                        disabled={busy}
+                        className="flex-1 bg-green-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                      >
+                        Confirmar
+                      </button>
+                      <button
+                        onClick={() =>
+                          run(
+                            () => sharingService.reopenPayment(n.ticketId!, n.actorId!),
+                            'Vuelve a quedar pendiente'
+                          )
+                        }
+                        disabled={busy}
+                        className="flex-1 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                      >
+                        No lo he recibido
+                      </button>
+                    </div>
+                  )}
+
+                  {n.resolved !== null && (
+                    <span className="inline-block mt-3 text-[10px] font-black uppercase tracking-wide text-gray-600 bg-gray-100 rounded-full px-2.5 py-1.5">
+                      {resolvedLabel[n.resolved] || n.resolved}
+                    </span>
+                  )}
+
+                  {(canViewTicket || (n.type === 'payment_sent' && actor)) && (
+                    <div className="mt-3 flex gap-2">
+                      {canViewTicket && (
+                        <button
+                          onClick={() => {
+                            markRead(n);
+                            onOpenShared!(n.ticketId!);
+                          }}
+                          className="text-[11px] font-black uppercase tracking-widest text-indigo-700 border border-gray-200 bg-white rounded-xl px-4 py-2.5"
+                        >
+                          Ver ticket
+                        </button>
+                      )}
+                      {n.type === 'payment_sent' && actor && (
+                        <button
+                          onClick={() => {
+                            markRead(n);
+                            openPerson(actor);
+                          }}
+                          className="text-[11px] font-black uppercase tracking-widest text-indigo-700 border border-gray-200 bg-white rounded-xl px-4 py-2.5"
+                        >
+                          Ver ficha
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {outgoing.length > 0 && (
               <>

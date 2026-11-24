@@ -8,8 +8,8 @@ import Settings from './views/Settings';
 import Friends from './views/Friends';
 import SharedTicketView from './views/SharedTicketView';
 import JoinInvite from './views/JoinInvite';
-import { pendingInvite, sharingService, OwnedSharedTicket } from './sharingService';
-import { friendsService } from './friendsService';
+import { pendingInvite } from './sharingService';
+import { notificationsService } from './notificationsService';
 import Auth from './views/Auth';
 import ResetPassword from './views/ResetPassword';
 import { useAuth } from './src/contexts/AuthContext';
@@ -116,19 +116,10 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user || view === 'friends') return;
     let active = true;
-    Promise.all([
-      friendsService.listRequests(),
-      sharingService.listOwnedSharedTickets().catch((): OwnedSharedTicket[] => []),
-    ])
-      .then(([rq, owned]) => {
-        // Solicitudes recibidas + pagos que otros han marcado como enviados y esperan tu confirmación.
-        const claims = owned.reduce(
-          (n, t) => n + t.members.filter((m) => m.participantId && m.status === 'sent').length,
-          0
-        );
-        if (active) {
-          setPendingFriendRequests(rq.filter((r) => r.direction === 'incoming').length + claims);
-        }
+    notificationsService
+      .attentionCount()
+      .then((count) => {
+        if (active) setPendingFriendRequests(count);
       })
       .catch(() => {
         // Si la parte social aún no está activada en el servidor, no se muestra el aviso.
@@ -265,7 +256,15 @@ const App: React.FC = () => {
           />
         ) : null;
       case 'friends':
-        return <Friends onPendingCountChange={setPendingFriendRequests} />;
+        return (
+          <Friends
+            onPendingCountChange={setPendingFriendRequests}
+            onOpenShared={(id) => {
+              setSelectedSharedId(id);
+              setView('shared');
+            }}
+          />
+        );
       case 'settings':
         return <Settings />;
       default:
