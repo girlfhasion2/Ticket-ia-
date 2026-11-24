@@ -1,6 +1,8 @@
 export interface Person {
   id: string;
   name: string;
+  /** Si es un amigo de la app: su id de usuario. Sin él, es un nombre libre. */
+  userId?: string;
 }
 
 export interface Assignment {

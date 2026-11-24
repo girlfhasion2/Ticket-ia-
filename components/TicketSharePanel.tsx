@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link2, Copy, Share2, X, RefreshCw, Users, AlertCircle } from 'lucide-react';
 import { Person } from '../types';
 import { friendsService, friendLabel, Friend } from '../friendsService';
@@ -7,9 +7,20 @@ import { sharingService, TicketMember, buildInviteUrl } from '../sharingService'
 interface TicketSharePanelProps {
   ticketId: string;
   participants: Person[];
+  /** Nombre con el que esta persona ve a cada participante (apodos). */
+  labelOf?: (p: Person) => string;
+  /** El propietario quitó el acceso a un amigo añadido como participante. */
+  onUnlinkFriend?: (participantId: string) => void;
 }
 
-const TicketSharePanel: React.FC<TicketSharePanelProps> = ({ ticketId, participants }) => {
+const TicketSharePanel: React.FC<TicketSharePanelProps> = ({
+  ticketId,
+  participants,
+  labelOf,
+  onUnlinkFriend,
+}) => {
+  const nameOf = (p: Person) => (labelOf ? labelOf(p) : p.name);
+  const linkAttempts = useRef<Map<string, number>>(new Map());
   const [members, setMembers] = useState<TicketMember[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -82,7 +93,32 @@ const TicketSharePanel: React.FC<TicketSharePanelProps> = ({ ticketId, participa
   const looseMembers = members.filter(
     (m) => !m.participantId || !participantIds.has(m.participantId)
   );
-  const freeParticipants = participants.filter((p) => !memberByParticipant.has(p.id));
+  const freeParticipants = participants.filter((p) => !memberByParticipant.has(p.id) && !p.userId);
+
+  // Amigos añadidos como participantes: se vinculan solos en cuanto el ticket está guardado.
+  const pendingLinks = participants.filter(
+    (p) => p.userId && memberByParticipant.get(p.id)?.userId !== p.userId
+  );
+  const pendingKey = pendingLinks.map((p) => `${p.id}:${p.userId}`).join('|');
+  useEffect(() => {
+    if (loading || error || pendingLinks.length === 0) return;
+    const next = pendingLinks.find(
+      (p) => (linkAttempts.current.get(`${p.id}:${p.userId}`) || 0) < 5
+    );
+    if (!next) return;
+    const key = `${next.id}:${next.userId}`;
+    const timer = window.setTimeout(async () => {
+      linkAttempts.current.set(key, (linkAttempts.current.get(key) || 0) + 1);
+      try {
+        await sharingService.linkMember(ticketId, next.userId as string, next.id);
+      } catch {
+        /* el ticket puede no estar guardado aún: se reintenta */
+      }
+      load();
+    }, 1200);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKey, loading, error, members]);
 
   const inviteUrl = inviteToken ? buildInviteUrl(inviteToken) : '';
 
@@ -165,7 +201,7 @@ const TicketSharePanel: React.FC<TicketSharePanelProps> = ({ ticketId, participa
                     key={p.id}
                     className="flex items-center justify-between gap-2 bg-gray-50 rounded-2xl px-3 py-2.5"
                   >
-                    <span className="text-sm font-bold text-gray-800 truncate">{p.name}</span>
+                    <span className="text-sm font-bold text-gray-800 truncate">{nameOf(p)}</span>
                     {m ? (
                       <span className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl pl-3 pr-1.5 py-1.5 text-xs font-black max-w-[55%]">
                         <span className="truncate">{nameOfUser(m)}</span>
@@ -174,13 +210,18 @@ const TicketSharePanel: React.FC<TicketSharePanelProps> = ({ ticketId, participa
                           disabled={busy}
                           aria-label={`Quitar acceso a ${nameOfUser(m)}`}
                           onClick={() =>
-                            run(() => sharingService.removeMember(ticketId, m.userId), 'Acceso quitado')
+                            run(async () => {
+                              await sharingService.removeMember(ticketId, m.userId);
+                              if (p.userId) onUnlinkFriend?.(p.id);
+                            }, 'Acceso quitado')
                           }
                           className="p-0.5 hover:text-red-500"
                         >
                           <X size={14} />
                         </button>
                       </span>
+                    ) : p.userId ? (
+                      <span className="text-[11px] font-bold text-gray-400">Vinculando…</span>
                     ) : (
                       <select
                         value=""

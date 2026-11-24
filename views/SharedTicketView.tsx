@@ -4,6 +4,7 @@ import { sharingService, SharedTicket } from '../sharingService';
 import { friendsService } from '../friendsService';
 import { formatMoney } from '../utils/format';
 import { computeTicketTotals } from '../utils/ticketTotals';
+import { useParticipantLabels } from '../hooks/useParticipantLabels';
 
 interface SharedTicketViewProps {
   ticketId: string;
@@ -17,6 +18,7 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
   const [openId, setOpenId] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [paying, setPaying] = useState(false);
+  const labelOf = useParticipantLabels(ticketId, shared?.ticket.participants ?? []);
 
   const load = useCallback(async () => {
     try {
@@ -112,7 +114,7 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
 
   const { ticket, myParticipantId } = shared;
   const { totals, items, pending } = computeTicketTotals(ticket);
-  const nameById = new Map(ticket.participants.map((p) => [p.id, p.name]));
+  const nameById = new Map(ticket.participants.map((p) => [p.id, labelOf(p)]));
   const myName = myParticipantId ? nameById.get(myParticipantId) : undefined;
   const myTotal = myParticipantId ? totals[myParticipantId] : undefined;
 
@@ -221,7 +223,7 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
                     className="w-full flex items-center gap-2 p-3 text-left"
                   >
                     <span className="flex-1 min-w-0 text-sm font-black text-gray-900 truncate">
-                      {p.name}
+                      {labelOf(p)}
                       {isMe && (
                         <span className="ml-2 text-[9px] font-black uppercase tracking-widest bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">
                           Tú

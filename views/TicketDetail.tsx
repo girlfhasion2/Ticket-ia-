@@ -6,10 +6,14 @@ import {
   ArrowLeft, Camera, Images, Trash2, Plus, Users,
   AlertCircle, CheckCircle2, RefreshCw, UserPlus, X, Undo2, ArchiveX,
   Maximize2, Sparkles, MessageCircle, CreditCard, RotateCcw, Check, Download,
-  ChevronDown
+  ChevronDown, UserRound
 } from 'lucide-react';
 import LiveCameraModal from '../components/LiveCameraModal';
 import TicketSharePanel from '../components/TicketSharePanel';
+import ParticipantPicker from '../components/ParticipantPicker';
+import { useParticipantLabels } from '../hooks/useParticipantLabels';
+import { Friend } from '../friendsService';
+import { sharingService } from '../sharingService';
 import { prepareReceiptImage } from '../utils/imageUtils';
 import { formatMoney, formatPriceForInput } from '../utils/format';
 
@@ -215,6 +219,8 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
       active = false;
     };
   }, []);
+
+  const labelOf = useParticipantLabels(ticket?.id, ticket?.participants ?? []);
 
   if (!ticket) return <div className="p-8 text-center font-medium text-gray-500 italic">Cargando ticket...</div>;
 
@@ -469,7 +475,30 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
     setNewParticipantName("");
   };
 
+  const addFriendParticipant = (friend: Friend) => {
+    if (ticket.participants.some(p => p.userId === friend.friendId)) return;
+    // En el ticket se guarda el nombre público del amigo, nunca tu apodo privado.
+    const newPerson: Person = { id: crypto.randomUUID(), name: friend.displayName, userId: friend.friendId };
+    saveTicketAndSyncTotal({ ...ticket, participants: [...ticket.participants, newPerson] });
+  };
+
+  const unlinkFriendParticipant = (participantId: string) => {
+    saveTicketAndSyncTotal({
+      ...ticket,
+      participants: ticket.participants.map(p => {
+        if (p.id !== participantId) return p;
+        const { userId: _omit, ...rest } = p;
+        return rest;
+      })
+    });
+  };
+
   const removeLocalParticipant = (id: string) => {
+    const removed = ticket.participants.find(p => p.id === id);
+    if (removed?.userId) {
+      // Quitar a un amigo del ticket también le retira el acceso.
+      sharingService.removeMember(ticket.id, removed.userId).catch(() => {});
+    }
     const participants = ticket.participants.filter(p => p.id !== id);
     const lines = ticket.lines.map(line => ({
       ...line,
@@ -829,7 +858,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
           `  • ${item.description}${formatShareQuantity(item.num, item.den)} — ${formatMoney(item.amount)}`
       );
       const total = formatMoney(userTotals[p.id] || 0);
-      sections.push('', [`*${p.name} — ${total}*`, ...personLines].join('\n'));
+      sections.push('', [`*${labelOf(p)} — ${total}*`, ...personLines].join('\n'));
     });
 
     return `https://wa.me/?text=${encodeURIComponent(sections.join('\n'))}`;
@@ -968,22 +997,32 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
               </div>
               <div className="flex flex-wrap gap-2">
                 {ticket.participants.map(p => (
-                  <div key={p.id} className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl text-sm font-bold text-indigo-700">
-                    {p.name}
+                  <div
+                    key={p.id}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-xl text-sm font-bold ${p.userId ? 'bg-indigo-50 border-indigo-100 text-indigo-700' : 'bg-gray-100 border-gray-200 text-gray-600'}`}
+                  >
+                    {p.userId && <UserRound size={14} className="shrink-0" aria-label="Amigo de la app" />}
+                    {labelOf(p)}
                     <button onClick={() => removeLocalParticipant(p.id)} className="hover:text-red-500 active-scale p-0.5">
                       <X size={14} />
                     </button>
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2 pt-2">
-                <input type="text" placeholder="Añadir nombre..." value={newParticipantName} onChange={(e) => setNewParticipantName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addLocalParticipant(newParticipantName)} className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-sm font-bold outline-none border border-transparent focus:border-indigo-200 focus:bg-white transition-all shadow-inner" />
-                <button onClick={() => addLocalParticipant(newParticipantName)} className="bg-indigo-600 text-white px-5 rounded-xl active-scale shadow-md"><Plus size={24} /></button>
-              </div>
+              <ParticipantPicker
+                participants={ticket.participants}
+                onAddFree={addLocalParticipant}
+                onAddFriend={addFriendParticipant}
+              />
+              {ticket.participants.some(p => p.userId) && (
+                <p className="text-[11px] font-semibold text-gray-400">
+                  Las personas con icono son amigos de la app: verán este ticket cuando tenga productos.
+                </p>
+              )}
             </div>
 
             {(ticket.participants.length > 0 || ticket.lines.length > 0) && (
-              <TicketSharePanel ticketId={ticket.id} participants={ticket.participants} />
+              <TicketSharePanel ticketId={ticket.id} participants={ticket.participants} labelOf={labelOf} onUnlinkFriend={unlinkFriendParticipant} />
             )}
 
             <div className="space-y-3">
@@ -1316,16 +1355,16 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                          <button
                            type="button"
                            aria-expanded={isPersonPickerOpen}
-                           aria-label={`Persona seleccionada: ${activePerson.name}, ${formatMoney(userTotals[activePerson.id] || 0)}`}
+                           aria-label={`Persona seleccionada: ${labelOf(activePerson)}, ${formatMoney(userTotals[activePerson.id] || 0)}`}
                            onClick={() => setIsPersonPickerOpen(prev => !prev)}
                            className="flex-1 min-w-0 min-h-[52px] px-3 rounded-2xl bg-white border border-gray-200 hover:border-indigo-200 shadow-sm flex items-center justify-between gap-2 active-scale transition-colors"
                          >
                            <div className="flex items-center gap-2.5 min-w-0">
                              <div className="hidden sm:flex w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 font-black text-sm items-center justify-center shrink-0">
-                               {activePerson.name.charAt(0).toUpperCase()}
+                               {labelOf(activePerson).charAt(0).toUpperCase()}
                              </div>
                              <span className="font-black text-sm text-gray-900 truncate">
-                               {activePerson.name}
+                               {labelOf(activePerson)}
                              </span>
                            </div>
                            <div className="flex items-center gap-1.5 shrink-0">
@@ -1359,7 +1398,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                    }`}
                                  >
                                    <span className="text-xs font-bold truncate min-w-0">
-                                     {p.name}
+                                     {labelOf(p)}
                                    </span>
                                    <span
                                      className={`text-xs font-black tabular-nums shrink-0 ${
@@ -1410,7 +1449,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                : 'bg-white text-gray-500 border-gray-200'
                            }`}
                          >
-                           <span className="truncate">De {activePerson.name}</span>
+                           <span className="truncate">De {labelOf(activePerson)}</span>
                          </button>
                        )}
                      </div>
@@ -1463,7 +1502,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                            const newPids = isSelected ? asgn.personIds.filter(id => id !== p.id) : [...asgn.personIds, p.id];
                                            updateAssignment(line.id, asgn.id, { personIds: newPids });
                                          }} className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} active-scale`}>
-                                           {p.name}
+                                           {labelOf(p)}
                                          </button>
                                        );
                                      })}
@@ -1485,7 +1524,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                            {effectiveFilter === 'pending'
                              ? 'Todo repartido'
                              : effectiveFilter === 'person'
-                             ? `${activePerson.name} no tiene productos asignados`
+                             ? `${labelOf(activePerson)} no tiene productos asignados`
                              : 'No hay productos en este ticket'}
                          </div>
                        )}
@@ -1725,9 +1764,9 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                        groupParticipants.length === 0
                                          ? 'Sin personas asignadas'
                                          : groupParticipants.length === 1
-                                         ? `Solo ${groupParticipants[0].name}`
+                                         ? `Solo ${labelOf(groupParticipants[0])}`
                                          : `Compartido: ${groupParticipants
-                                             .map(p => p.name)
+                                             .map(p => labelOf(p))
                                              .join(', ')}`;
                                      const perPersonGroupAmount =
                                        groupParticipants.length > 0
@@ -1814,10 +1853,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                                    key={p.id}
                                                    type="button"
                                                    disabled
-                                                   aria-label={`${p.name}, incluida en este grupo`}
+                                                   aria-label={`${labelOf(p)}, incluida en este grupo`}
                                                    className="min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border bg-indigo-600 border-indigo-600 text-white shadow-md cursor-default"
                                                  >
-                                                   {p.name}
+                                                   {labelOf(p)}
                                                  </button>
                                                );
                                              }
@@ -1840,7 +1879,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                                      : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
                                                  }`}
                                                >
-                                                 {p.name}
+                                                 {labelOf(p)}
                                                </button>
                                              );
                                            })}
@@ -1911,10 +1950,10 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                                  key={p.id}
                                                  type="button"
                                                  disabled
-                                                 aria-label={`${p.name}, incluida en este grupo`}
+                                                 aria-label={`${labelOf(p)}, incluida en este grupo`}
                                                  className="min-h-[44px] px-3.5 py-2 rounded-xl text-[11px] font-black border bg-indigo-600 border-indigo-600 text-white shadow-md cursor-default"
                                                >
-                                                 {p.name}
+                                                 {labelOf(p)}
                                                </button>
                                              );
                                            }
@@ -1936,7 +1975,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                                    : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
                                                }`}
                                              >
-                                               {p.name}
+                                               {labelOf(p)}
                                              </button>
                                            );
                                          })}
@@ -2050,8 +2089,8 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                   return (
                     <button type="button" key={p.id} onClick={() => setPersonDetailModal(p.id)} className="w-full text-left bg-white p-6 rounded-3xl border border-gray-100 flex items-center justify-between shadow-sm hover:shadow-md transition-shadow active-scale">
                       <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner">{p.name[0].toUpperCase()}</div>
-                        <div><p className="font-black text-gray-900 text-xl tracking-tight leading-none mb-1">{p.name}</p><p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{share.toFixed(0)}% del reparto</p></div>
+                        <div className="w-14 h-14 bg-gradient-to-br from-indigo-50 to-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner">{labelOf(p)[0].toUpperCase()}</div>
+                        <div><p className="font-black text-gray-900 text-xl tracking-tight leading-none mb-1">{labelOf(p)}</p><p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{share.toFixed(0)}% del reparto</p></div>
                       </div>
                       <p className="text-3xl font-black text-gray-900 tracking-tighter tabular-nums">{formatMoney(amount)}</p>
                     </button>
@@ -2159,7 +2198,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
             >
               <div className="px-4 py-3 flex justify-between items-center text-white bg-indigo-900">
                 <div className="min-w-0 mr-3">
-                  <h4 className="font-black text-lg truncate">{person.name}</h4>
+                  <h4 className="font-black text-lg truncate">{labelOf(person)}</h4>
                   <p className="text-[11px] opacity-70 font-bold uppercase tracking-widest">{items.length} {items.length === 1 ? 'producto' : 'productos'}</p>
                 </div>
                 <button
@@ -2380,7 +2419,7 @@ const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, initialTicket, on
                                 }}
                                 className={`px-4 py-2 rounded-xl text-[11px] font-black border transition-all active-scale ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
                               >
-                                {p.name}
+                                {labelOf(p)}
                               </button>
                             );
                           })}

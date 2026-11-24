@@ -8,6 +8,13 @@ export interface TicketMember {
   joinedAt: string;
 }
 
+export interface ParticipantLabel {
+  participantId: string;
+  displayName: string;
+  /** Apodo que quien mira tiene guardado para esa persona. */
+  alias: string | null;
+}
+
 export type PaymentStatus = 'pending' | 'sent' | 'confirmed';
 
 export interface SharedTicket {
@@ -141,6 +148,17 @@ export const sharingService = {
       displayName: r.display_name,
       participantId: r.participant_id,
       joinedAt: r.joined_at,
+    }));
+  },
+
+  async getParticipantLabels(ticketId: string): Promise<ParticipantLabel[]> {
+    const rows = await rpc<
+      { participant_id: string; display_name: string; alias: string | null }[]
+    >('get_ticket_participant_labels', { p_ticket: ticketId });
+    return (rows || []).map((r) => ({
+      participantId: r.participant_id,
+      displayName: r.display_name,
+      alias: r.alias,
     }));
   },
 
