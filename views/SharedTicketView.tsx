@@ -16,6 +16,7 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [paying, setPaying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -44,6 +45,18 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
     } catch (e: any) {
       setError(e?.message || 'No se pudo salir del ticket.');
       setLeaving(false);
+    }
+  };
+
+  const changePayment = async (action: () => Promise<void>) => {
+    setPaying(true);
+    try {
+      await action();
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo cambiar el estado del pago.');
+    } finally {
+      setPaying(false);
     }
   };
 
@@ -142,6 +155,48 @@ const SharedTicketView: React.FC<SharedTicketViewProps> = ({ ticketId, onBack })
           <div className="bg-white border border-gray-100 rounded-2xl p-4 text-xs font-semibold text-gray-600">
             Todavía no estás vinculado a ningún nombre de este ticket. Pídele a {shared.ownerName} que
             te vincule para ver tu parte.
+          </div>
+        )}
+
+        {myParticipantId && myTotal !== undefined && myTotal > 0.005 && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+              Tu pago a {shared.ownerName}
+            </div>
+            {shared.myPaymentStatus === 'confirmed' && (
+              <div className="bg-green-50 border border-green-100 text-green-700 rounded-xl px-3 py-2.5 text-xs font-black">
+                Pagado ✓ {shared.ownerName} ya lo ha confirmado.
+              </div>
+            )}
+            {shared.myPaymentStatus === 'sent' && (
+              <>
+                <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-3 py-2.5 text-xs font-black">
+                  Enviado. Esperando a que {shared.ownerName} lo confirme.
+                </div>
+                <button
+                  onClick={() => changePayment(() => sharingService.undoPaymentSent(ticketId))}
+                  disabled={paying}
+                  className="w-full border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3 disabled:opacity-50"
+                >
+                  Deshacer
+                </button>
+              </>
+            )}
+            {shared.myPaymentStatus === 'pending' && (
+              <>
+                <div className="text-xs font-semibold text-gray-600">
+                  Cuando le hayas pagado {formatMoney(myTotal)}, márcalo. No pasa a pagado hasta que
+                  {' '}{shared.ownerName} lo confirme.
+                </div>
+                <button
+                  onClick={() => changePayment(() => sharingService.markPaymentSent(ticketId))}
+                  disabled={paying}
+                  className="w-full bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3 disabled:opacity-50"
+                >
+                  Marcar como enviado
+                </button>
+              </>
+            )}
           </div>
         )}
 

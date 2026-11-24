@@ -8,11 +8,31 @@ export interface TicketMember {
   joinedAt: string;
 }
 
+export type PaymentStatus = 'pending' | 'sent' | 'confirmed';
+
 export interface SharedTicket {
   ticketId: string;
+  ownerId: string;
   ownerName: string;
   myParticipantId: string | null;
+  myPaymentStatus: PaymentStatus;
+  lastReminderAt: string | null;
   ticket: Ticket;
+}
+
+export interface OwnedMember {
+  userId: string;
+  displayName: string;
+  participantId: string | null;
+  status: PaymentStatus;
+  lastReminderAt: string | null;
+}
+
+/** Un ticket mío que he compartido, con el estado de pago de cada miembro. */
+export interface OwnedSharedTicket {
+  ticketId: string;
+  ticket: Ticket;
+  members: OwnedMember[];
 }
 
 export interface InvitePreview {
@@ -80,15 +100,21 @@ async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
 
 type SharedRow = {
   ticket_id: string;
+  owner_id: string;
   owner_name: string;
   my_participant_id: string | null;
+  my_payment_status: PaymentStatus;
+  last_reminder_at: string | null;
   data: Ticket;
 };
 
 const toShared = (r: SharedRow): SharedTicket => ({
   ticketId: r.ticket_id,
+  ownerId: r.owner_id,
   ownerName: r.owner_name,
   myParticipantId: r.my_participant_id,
+  myPaymentStatus: r.my_payment_status || 'pending',
+  lastReminderAt: r.last_reminder_at,
   ticket: r.data,
 });
 
@@ -159,6 +185,56 @@ export const sharingService = {
   async listSharedTickets(): Promise<SharedTicket[]> {
     const rows = await rpc<SharedRow[]>('list_shared_tickets');
     return (rows || []).map(toShared);
+  },
+
+  async listOwnedSharedTickets(): Promise<OwnedSharedTicket[]> {
+    const rows = await rpc<
+      {
+        ticket_id: string;
+        data: Ticket;
+        members:
+          | {
+              user_id: string;
+              display_name: string;
+              participant_id: string | null;
+              status: PaymentStatus;
+              last_reminder_at: string | null;
+            }[]
+          | null;
+      }[]
+    >('list_owned_shared_tickets');
+    return (rows || []).map((r) => ({
+      ticketId: r.ticket_id,
+      ticket: r.data,
+      members: (r.members || []).map((m) => ({
+        userId: m.user_id,
+        displayName: m.display_name,
+        participantId: m.participant_id,
+        status: m.status || 'pending',
+        lastReminderAt: m.last_reminder_at,
+      })),
+    }));
+  },
+
+  // ----- Pagos -----
+  async markPaymentSent(ticketId: string): Promise<void> {
+    await rpc<void>('mark_payment_sent', { p_ticket: ticketId });
+  },
+
+  async undoPaymentSent(ticketId: string): Promise<void> {
+    await rpc<void>('undo_payment_sent', { p_ticket: ticketId });
+  },
+
+  async confirmPayment(ticketId: string, userId: string): Promise<void> {
+    await rpc<void>('confirm_payment', { p_ticket: ticketId, p_user: userId });
+  },
+
+  async reopenPayment(ticketId: string, userId: string): Promise<void> {
+    await rpc<void>('reopen_payment', { p_ticket: ticketId, p_user: userId });
+  },
+
+  async remindPayment(ticketId: string, userId: string): Promise<void> {
+    await rpc<void>('remind_payment', { p_ticket: ticketId, p_user: userId });
   },
 
   async getSharedTicket(ticketId: string): Promise<SharedTicket | null> {

@@ -8,7 +8,7 @@ import Settings from './views/Settings';
 import Friends from './views/Friends';
 import SharedTicketView from './views/SharedTicketView';
 import JoinInvite from './views/JoinInvite';
-import { pendingInvite } from './sharingService';
+import { pendingInvite, sharingService, OwnedSharedTicket } from './sharingService';
 import { friendsService } from './friendsService';
 import Auth from './views/Auth';
 import ResetPassword from './views/ResetPassword';
@@ -116,10 +116,19 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user || view === 'friends') return;
     let active = true;
-    friendsService
-      .listRequests()
-      .then((rq) => {
-        if (active) setPendingFriendRequests(rq.filter((r) => r.direction === 'incoming').length);
+    Promise.all([
+      friendsService.listRequests(),
+      sharingService.listOwnedSharedTickets().catch((): OwnedSharedTicket[] => []),
+    ])
+      .then(([rq, owned]) => {
+        // Solicitudes recibidas + pagos que otros han marcado como enviados y esperan tu confirmación.
+        const claims = owned.reduce(
+          (n, t) => n + t.members.filter((m) => m.participantId && m.status === 'sent').length,
+          0
+        );
+        if (active) {
+          setPendingFriendRequests(rq.filter((r) => r.direction === 'incoming').length + claims);
+        }
       })
       .catch(() => {
         // Si la parte social aún no está activada en el servidor, no se muestra el aviso.

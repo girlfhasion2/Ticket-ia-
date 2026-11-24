@@ -15,6 +15,7 @@ import {
   Ban,
   UserMinus,
   Smartphone,
+  Bell,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -25,15 +26,37 @@ import {
   FriendRequest,
   MyProfile,
 } from '../friendsService';
+import { sharingService, OwnedSharedTicket, SharedTicket } from '../sharingService';
+import {
+  buildBalances,
+  isOpen,
+  sumOpen,
+  BalanceEntry,
+  PersonBalance,
+} from '../utils/balances';
+import { formatMoney } from '../utils/format';
 
 type Screen = 'list' | 'detail' | 'add';
 type Tab = 'friends' | 'inbox';
 type AddMode = 'email' | 'code' | 'contacts';
+type Filter = 'all' | 'owed' | 'owe';
 
 interface FriendsProps {
-  /** Avisa a la app del número de solicitudes recibidas (para el punto de la barra). */
+  /** Avisa a la app de lo que requiere tu atención (solicitudes y pagos por confirmar). */
   onPendingCountChange?: (count: number) => void;
 }
+
+/** Una persona con la que tengo trato: un amigo, o alguien que solo comparte tickets. */
+interface Person {
+  userId: string;
+  name: string;
+  realName: string;
+  friend: Friend | null;
+  entries: BalanceEntry[];
+}
+
+const REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const REMINDER_VISIBLE_MS = 14 * 24 * 60 * 60 * 1000;
 
 const shortDate = (iso?: string | null): string => {
   if (!iso) return '';
@@ -53,11 +76,50 @@ const Avatar: React.FC<{ name: string; size?: number }> = ({ name, size = 42 }) 
   </div>
 );
 
+const chipClass = (kind: 'neutral' | 'owed' | 'owe' | 'wait') =>
+  `text-xs font-black rounded-xl px-2.5 py-1.5 whitespace-nowrap ${
+    kind === 'owed'
+      ? 'bg-green-50 text-green-700'
+      : kind === 'owe'
+      ? 'bg-red-50 text-red-600'
+      : kind === 'wait'
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-gray-100 text-gray-500'
+  }`;
+
+/** Texto y color del resumen de una persona en la lista. */
+function summarize(
+  entries: BalanceEntry[],
+  filter: Filter
+): { text: string; kind: 'neutral' | 'owed' | 'owe' | 'wait' } {
+  const open = entries.filter(isOpen);
+  const owed = sumOpen(entries, 'theyOwe');
+  const owe = sumOpen(entries, 'iOwe');
+  if (filter === 'owed') return { text: `Te debe ${formatMoney(owed)}`, kind: 'owed' };
+  if (filter === 'owe') return { text: `Le debes ${formatMoney(owe)}`, kind: 'owe' };
+  if (open.length > 0 && open.every((e) => e.status === 'sent')) {
+    const dirs = new Set(open.map((e) => e.direction));
+    if (dirs.size === 1) {
+      return dirs.has('iOwe')
+        ? { text: 'Pago enviado', kind: 'wait' }
+        : { text: 'Confirma su pago', kind: 'wait' };
+    }
+  }
+  const net = owed - owe;
+  if (net > 0.005) return { text: `Te debe ${formatMoney(net)}`, kind: 'owed' };
+  if (net < -0.005) return { text: `Le debes ${formatMoney(-net)}`, kind: 'owe' };
+  if (open.length > 0) return { text: 'Saldo 0,00€', kind: 'neutral' };
+  return { text: 'Al día', kind: 'neutral' };
+}
+
 const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const [screen, setScreen] = useState<Screen>('list');
   const [tab, setTab] = useState<Tab>('friends');
+  const [filter, setFilter] = useState<Filter>('all');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [owned, setOwned] = useState<OwnedSharedTicket[]>([]);
+  const [shared, setShared] = useState<SharedTicket[]>([]);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +127,7 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const [toast, setToast] = useState('');
   const toastTimer = useRef<number | undefined>(undefined);
 
-  // Ficha del amigo
+  // Ficha
   const [editingAlias, setEditingAlias] = useState(false);
   const [aliasDraft, setAliasDraft] = useState('');
 
@@ -79,11 +141,60 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   const showToast = (msg: string) => {
     setToast(msg);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 2200);
+    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
   };
+
+  // ----- Datos derivados -----
+  const balances = buildBalances(owned, shared);
+  const people: Person[] = friends.map((f) => ({
+    userId: f.friendId,
+    name: friendLabel(f),
+    realName: f.displayName,
+    friend: f,
+    entries: balances.get(f.friendId)?.entries || [],
+  }));
+  balances.forEach((b: PersonBalance) => {
+    if (!friends.some((f) => f.friendId === b.userId)) {
+      people.push({
+        userId: b.userId,
+        name: b.displayName,
+        realName: b.displayName,
+        friend: null,
+        entries: b.entries,
+      });
+    }
+  });
+  people.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+
+  const owedTotal = people.reduce((s, p) => s + sumOpen(p.entries, 'theyOwe'), 0);
+  const oweTotal = people.reduce((s, p) => s + sumOpen(p.entries, 'iOwe'), 0);
+
+  const visiblePeople = people.filter((p) => {
+    if (filter === 'owed') return p.entries.some((e) => isOpen(e) && e.direction === 'theyOwe');
+    if (filter === 'owe') return p.entries.some((e) => isOpen(e) && e.direction === 'iOwe');
+    return true;
+  });
 
   const incoming = requests.filter((r) => r.direction === 'incoming');
   const outgoing = requests.filter((r) => r.direction === 'outgoing');
+
+  const claims: { person: Person; entry: BalanceEntry }[] = [];
+  const reminders: { person: Person; entry: BalanceEntry }[] = [];
+  const now = Date.now();
+  people.forEach((p) => {
+    p.entries.forEach((e) => {
+      if (e.direction === 'theyOwe' && e.status === 'sent') claims.push({ person: p, entry: e });
+      if (
+        e.direction === 'iOwe' &&
+        e.status !== 'confirmed' &&
+        e.lastReminderAt &&
+        now - new Date(e.lastReminderAt).getTime() < REMINDER_VISIBLE_MS
+      ) {
+        reminders.push({ person: p, entry: e });
+      }
+    });
+  });
+  const attentionCount = incoming.length + claims.length;
 
   const reload = useCallback(async () => {
     try {
@@ -95,8 +206,19 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
       setFriends(fr);
       setRequests(rq);
       setProfile(pf);
+      // Compartir tickets puede no estar activado todavía en el servidor: no es un error de Amigos.
+      const [ow, sh] = await Promise.all([
+        sharingService.listOwnedSharedTickets().catch(() => [] as OwnedSharedTicket[]),
+        sharingService.listSharedTickets().catch(() => [] as SharedTicket[]),
+      ]);
+      setOwned(ow);
+      setShared(sh);
       setError(null);
-      onPendingCountChange?.(rq.filter((r) => r.direction === 'incoming').length);
+      const claimCount = ow.reduce(
+        (n, t) => n + t.members.filter((m) => m.participantId && m.status === 'sent').length,
+        0
+      );
+      onPendingCountChange?.(rq.filter((r) => r.direction === 'incoming').length + claimCount);
     } catch (e: any) {
       setError(e?.message || 'No se pudieron cargar tus amigos.');
     } finally {
@@ -123,10 +245,10 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
     }
   };
 
-  const selected = friends.find((f) => f.friendId === selectedId) || null;
+  const selected = people.find((p) => p.userId === selectedId) || null;
 
-  const openFriend = (f: Friend) => {
-    setSelectedId(f.friendId);
+  const openPerson = (p: Person) => {
+    setSelectedId(p.userId);
     setEditingAlias(false);
     setScreen('detail');
   };
@@ -138,34 +260,76 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   };
 
   const saveAlias = async () => {
-    if (!selected) return;
+    if (!selected?.friend) return;
     const value = aliasDraft.trim();
     await run(
-      () => friendsService.setAlias(selected.friendId, value),
+      () => friendsService.setAlias(selected.friend!.friendId, value),
       value ? 'Apodo guardado' : 'Apodo quitado'
     );
     setEditingAlias(false);
   };
 
   const removeFriend = async () => {
-    if (!selected) return;
-    if (!window.confirm(`¿Eliminar a ${friendLabel(selected)} de tus amigos?`)) return;
-    await run(() => friendsService.removeFriend(selected.friendId), 'Amistad eliminada');
+    if (!selected?.friend) return;
+    if (!window.confirm(`¿Eliminar a ${selected.name} de tus amigos?`)) return;
+    await run(() => friendsService.removeFriend(selected.friend!.friendId), 'Amistad eliminada');
     backToList();
   };
 
   const blockFriend = async () => {
-    if (!selected) return;
+    if (!selected?.friend) return;
     if (
       !window.confirm(
-        `¿Bloquear a ${friendLabel(selected)}? Dejaréis de ser amigos y no podrá enviarte solicitudes.`
+        `¿Bloquear a ${selected.name}? Dejaréis de ser amigos y no podrá enviarte solicitudes.`
       )
     )
       return;
-    await run(() => friendsService.blockUser(selected.friendId), 'Usuario bloqueado');
+    await run(() => friendsService.blockUser(selected.friend!.friendId), 'Usuario bloqueado');
     backToList();
   };
 
+  // ----- Pagos -----
+  const confirmEntry = (p: Person, e: BalanceEntry) =>
+    run(() => sharingService.confirmPayment(e.ticketId, p.userId), 'Pago confirmado. Queda como cobrado');
+  const reopenEntry = (p: Person, e: BalanceEntry) =>
+    run(() => sharingService.reopenPayment(e.ticketId, p.userId), 'Vuelve a quedar pendiente');
+  const sendEntry = (p: Person, e: BalanceEntry) =>
+    run(
+      () => sharingService.markPaymentSent(e.ticketId),
+      `Marcado como enviado. ${p.name} tiene que confirmarlo`
+    );
+  const undoEntry = (e: BalanceEntry) =>
+    run(() => sharingService.undoPaymentSent(e.ticketId), 'Envío deshecho');
+
+  const remindableEntries = (p: Person) =>
+    p.entries.filter(
+      (e) =>
+        e.direction === 'theyOwe' &&
+        e.status === 'pending' &&
+        (!e.lastReminderAt || Date.now() - new Date(e.lastReminderAt).getTime() > REMINDER_COOLDOWN_MS)
+    );
+
+  const remind = async (p: Person) => {
+    const targets = remindableEntries(p);
+    if (targets.length === 0) return;
+    setBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        targets.map((e) => sharingService.remindPayment(e.ticketId, p.userId))
+      );
+      const ok = results.filter((r) => r.status === 'fulfilled').length;
+      if (ok > 0) showToast(`Recordatorio enviado a ${p.name}`);
+      else {
+        const first = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        showToast(first?.reason?.message || 'No se pudo enviar el recordatorio.');
+      }
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ----- Añadir amigo -----
   const sendEmail = async () => {
     if (!emailInput.trim()) return;
     setBusy(true);
@@ -373,8 +537,46 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
     );
   }
 
-  // ---------- Ficha del amigo ----------
+  // ---------- Ficha ----------
   if (screen === 'detail' && selected) {
+    const open = selected.entries.filter(isOpen);
+    const owed = sumOpen(selected.entries, 'theyOwe');
+    const owe = sumOpen(selected.entries, 'iOwe');
+    const net = owed - owe;
+    const dirs = new Set(open.map((e) => e.direction));
+    const allSent = open.length > 0 && open.every((e) => e.status === 'sent') && dirs.size === 1;
+
+    let boxClass = 'bg-gray-100 text-gray-600 border border-transparent';
+    let label = open.length > 0 ? 'Saldo cruzado' : 'Estáis al día';
+    let value = formatMoney(open.length > 0 ? Math.abs(net) : 0);
+    let note = '';
+    if (allSent) {
+      boxClass = 'bg-amber-50 text-amber-700 border border-amber-200';
+      if (dirs.has('iOwe')) {
+        label = `Pago enviado a ${selected.name}`;
+        note = `Esperando a que ${selected.name} lo confirme. Hasta entonces no cuenta como pagado.`;
+        value = formatMoney(owe);
+      } else {
+        label = `${selected.name} dice que te ha pagado`;
+        note = 'Confírmalo abajo cuando lo hayas recibido.';
+        value = formatMoney(owed);
+      }
+    } else if (net > 0.005) {
+      boxClass = 'bg-green-50 text-green-700 border border-green-100';
+      label = `${selected.name} te debe`;
+      value = formatMoney(net);
+    } else if (net < -0.005) {
+      boxClass = 'bg-red-50 text-red-600 border border-red-200';
+      label = `Le debes a ${selected.name}`;
+      value = formatMoney(-net);
+    }
+
+    const canRemind = remindableEntries(selected).length > 0;
+    const hasPendingOwed = selected.entries.some(
+      (e) => e.direction === 'theyOwe' && e.status === 'pending'
+    );
+    const alreadyReminded = hasPendingOwed && !canRemind;
+
     return (
       <div className="bg-gray-50 min-h-full">
         <div className="bg-white border-b border-gray-100 px-4 py-3.5">
@@ -382,9 +584,9 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
             <button onClick={backToList} aria-label="Volver">
               <ChevronLeft size={24} className="text-gray-900" />
             </button>
-            <Avatar name={friendLabel(selected)} size={40} />
+            <Avatar name={selected.name} size={40} />
             <div className="min-w-0 flex-1">
-              {editingAlias ? (
+              {editingAlias && selected.friend ? (
                 <div>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -396,7 +598,7 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
                         if (e.key === 'Escape') setEditingAlias(false);
                       }}
                       maxLength={40}
-                      placeholder={selected.displayName}
+                      placeholder={selected.realName}
                       className="flex-1 min-w-0 h-10 border-2 border-indigo-600 rounded-xl px-3 text-base font-extrabold text-gray-900 bg-white outline-none"
                     />
                     <button
@@ -422,22 +624,26 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
               ) : (
                 <>
                   <div className="flex items-center gap-2">
-                    <h1 className="text-base font-black text-gray-900 truncate">
-                      {friendLabel(selected)}
-                    </h1>
-                    <button
-                      onClick={() => {
-                        setAliasDraft(selected.alias || '');
-                        setEditingAlias(true);
-                      }}
-                      aria-label="Editar apodo"
-                      className="w-7 h-7 rounded-full bg-gray-100 text-indigo-700 flex items-center justify-center shrink-0"
-                    >
-                      <Pencil size={13} />
-                    </button>
+                    <h1 className="text-base font-black text-gray-900 truncate">{selected.name}</h1>
+                    {selected.friend && (
+                      <button
+                        onClick={() => {
+                          setAliasDraft(selected.friend?.alias || '');
+                          setEditingAlias(true);
+                        }}
+                        aria-label="Editar apodo"
+                        className="w-7 h-7 rounded-full bg-gray-100 text-indigo-700 flex items-center justify-center shrink-0"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
                   </div>
                   <div className="text-[11px] font-bold text-gray-500">
-                    {selected.alias ? selected.displayName : 'Sin apodo'}
+                    {!selected.friend
+                      ? 'No es tu amigo, comparte tickets contigo'
+                      : selected.friend.alias
+                      ? selected.realName
+                      : 'Sin apodo'}
                   </div>
                 </>
               )}
@@ -445,33 +651,136 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 text-center">
-            <div className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-              Tickets compartidos
-            </div>
-            <p className="text-xs font-semibold text-gray-500 mt-2">
-              Aquí verás lo que os debéis cuando compartáis tickets. Amigos desde el{' '}
-              {shortDate(selected.since) || 'principio'}.
-            </p>
+        <div className="p-4 space-y-4 pb-24">
+          <div className={`rounded-2xl p-4 ${boxClass}`}>
+            <div className="text-[10px] font-black uppercase tracking-widest">{label}</div>
+            <div className="text-3xl font-black mt-0.5">{value}</div>
+            {note && <div className="text-[11px] font-bold mt-1.5">{note}</div>}
           </div>
 
-          <div className="flex gap-2">
+          {canRemind && (
             <button
-              onClick={removeFriend}
+              onClick={() => remind(selected)}
               disabled={busy}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+              className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white text-[11px] font-black uppercase tracking-widest rounded-2xl py-3.5 disabled:opacity-50"
             >
-              <UserMinus size={14} /> Eliminar amigo
+              <Bell size={15} /> Recordar pago
             </button>
-            <button
-              onClick={blockFriend}
-              disabled={busy}
-              className="flex-1 flex items-center justify-center gap-1.5 border border-red-200 bg-white text-red-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-            >
-              <Ban size={14} /> Bloquear
-            </button>
+          )}
+          {alreadyReminded && (
+            <div className="w-full text-center bg-gray-100 text-gray-500 text-[11px] font-black uppercase tracking-widest rounded-2xl py-3.5">
+              Recordatorio enviado · otro en 24 h
+            </div>
+          )}
+
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">
+              Tickets compartidos
+            </div>
+            {selected.entries.length === 0 && (
+              <p className="text-xs font-semibold text-gray-400 py-2">
+                Todavía no compartís ningún ticket con importes.
+              </p>
+            )}
+            <div className="space-y-2">
+              {selected.entries.map((e) => {
+                const mine = e.direction === 'iOwe';
+                let stLabel: string;
+                let stClass: string;
+                let primary: { label: string; onClick: () => void } | null = null;
+                let secondary: { label: string; onClick: () => void } | null = null;
+                if (e.status === 'confirmed') {
+                  stLabel = mine ? 'Pagado ✓' : 'Cobrado ✓';
+                  stClass = 'bg-green-100 text-green-700';
+                  if (!mine) secondary = { label: 'Deshacer', onClick: () => reopenEntry(selected, e) };
+                } else if (e.status === 'sent') {
+                  stClass = 'bg-amber-100 text-amber-700';
+                  if (mine) {
+                    stLabel = `Enviado · esperando a ${selected.name}`;
+                    secondary = { label: 'Deshacer', onClick: () => undoEntry(e) };
+                  } else {
+                    stLabel = `${selected.name} dice que pagó`;
+                    primary = { label: 'Confirmar recibido', onClick: () => confirmEntry(selected, e) };
+                    secondary = { label: 'No lo he recibido', onClick: () => reopenEntry(selected, e) };
+                  }
+                } else {
+                  stLabel = 'Pendiente';
+                  stClass = 'bg-gray-100 text-gray-600';
+                  primary = mine
+                    ? { label: 'Marcar como enviado', onClick: () => sendEntry(selected, e) }
+                    : { label: 'Marcar como cobrado', onClick: () => confirmEntry(selected, e) };
+                }
+                return (
+                  <div key={e.ticketId} className="bg-white border border-gray-100 rounded-2xl p-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-black text-gray-900 truncate">{e.merchant}</div>
+                        <div className="text-[11px] font-bold text-gray-500">
+                          {shortDate(e.date)} · {mine ? `pagó ${selected.name}` : 'pagaste tú'}
+                        </div>
+                      </div>
+                      <div
+                        className={`text-sm font-black ${
+                          e.status === 'confirmed'
+                            ? 'text-gray-400 line-through'
+                            : mine
+                            ? 'text-red-600'
+                            : 'text-green-700'
+                        }`}
+                      >
+                        {mine ? '-' : '+'}
+                        {formatMoney(e.amount)}
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-wide rounded-full px-2.5 py-1.5 ${stClass}`}
+                      >
+                        {stLabel}
+                      </span>
+                      {primary && (
+                        <button
+                          onClick={primary.onClick}
+                          disabled={busy}
+                          className="min-h-[34px] px-3 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wide disabled:opacity-50"
+                        >
+                          {primary.label}
+                        </button>
+                      )}
+                      {secondary && (
+                        <button
+                          onClick={secondary.onClick}
+                          disabled={busy}
+                          className="min-h-[34px] px-3 rounded-xl border border-gray-200 bg-white text-gray-600 text-[10px] font-black uppercase tracking-wide disabled:opacity-50"
+                        >
+                          {secondary.label}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+
+          {selected.friend && (
+            <div className="flex gap-2">
+              <button
+                onClick={removeFriend}
+                disabled={busy}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+              >
+                <UserMinus size={14} /> Eliminar amigo
+              </button>
+              <button
+                onClick={blockFriend}
+                disabled={busy}
+                className="flex-1 flex items-center justify-center gap-1.5 border border-red-200 bg-white text-red-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+              >
+                <Ban size={14} /> Bloquear
+              </button>
+            </div>
+          )}
         </div>
         {toastEl}
       </div>
@@ -479,6 +788,17 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
   }
 
   // ---------- Lista ----------
+  const filterCard = (on: boolean, color: 'indigo' | 'green' | 'red') =>
+    `flex-1 min-w-0 text-left rounded-2xl p-3 border-2 ${
+      on
+        ? color === 'green'
+          ? 'bg-green-50 border-green-600'
+          : color === 'red'
+          ? 'bg-red-50 border-red-500'
+          : 'bg-indigo-50 border-indigo-600'
+        : 'bg-white border-gray-100'
+    }`;
+
   return (
     <div className="bg-gray-50 min-h-full">
       <div className="bg-white border-b border-gray-100 px-4 pt-3">
@@ -497,16 +817,16 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
           </button>
           <button onClick={() => setTab('inbox')} className={tabClass(tab === 'inbox')}>
             <Inbox size={14} /> Buzón
-            {incoming.length > 0 && (
+            {attentionCount > 0 && (
               <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 py-px">
-                {incoming.length}
+                {attentionCount}
               </span>
             )}
           </button>
         </div>
       </div>
 
-      <div className="p-4 space-y-3">
+      <div className="p-4 space-y-3 pb-24">
         {loading && (
           <div className="flex justify-center py-12">
             <RefreshCw size={24} className="animate-spin text-indigo-600" />
@@ -527,7 +847,30 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
 
         {!loading && !error && tab === 'friends' && (
           <>
-            {friends.length === 0 && (
+            <div className="flex gap-2">
+              <button onClick={() => setFilter('all')} className={filterCard(filter === 'all', 'indigo')}>
+                <div className="text-[10px] font-black uppercase tracking-widest text-gray-600">Todos</div>
+                <div className="text-lg font-black text-gray-900 mt-0.5 truncate">
+                  {people.length} {people.length === 1 ? 'persona' : 'personas'}
+                </div>
+              </button>
+              <button
+                onClick={() => setFilter(filter === 'owed' ? 'all' : 'owed')}
+                className={filterCard(filter === 'owed', 'green')}
+              >
+                <div className="text-[10px] font-black uppercase tracking-widest text-green-700">Te deben</div>
+                <div className="text-lg font-black text-green-700 mt-0.5 truncate">{formatMoney(owedTotal)}</div>
+              </button>
+              <button
+                onClick={() => setFilter(filter === 'owe' ? 'all' : 'owe')}
+                className={filterCard(filter === 'owe', 'red')}
+              >
+                <div className="text-[10px] font-black uppercase tracking-widest text-red-600">Debes</div>
+                <div className="text-lg font-black text-red-600 mt-0.5 truncate">{formatMoney(oweTotal)}</div>
+              </button>
+            </div>
+
+            {people.length === 0 && (
               <div className="text-center py-10">
                 <Users size={32} className="mx-auto text-gray-300 mb-2" />
                 <p className="text-sm font-black text-gray-700">Aún no tienes amigos</p>
@@ -536,33 +879,53 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
                 </p>
               </div>
             )}
-            {friends.map((f) => (
-              <button
-                key={f.friendId}
-                onClick={() => openFriend(f)}
-                className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-3 text-left"
-              >
-                <Avatar name={friendLabel(f)} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-black text-gray-900 truncate">{friendLabel(f)}</div>
-                  <div className="text-[11px] font-bold text-gray-500 truncate">
-                    {f.alias ? f.displayName : `Amigos desde el ${shortDate(f.since)}`}
-                  </div>
-                </div>
-                <ChevronRight size={16} className="text-gray-400" />
-              </button>
-            ))}
 
+            {people.length > 0 && visiblePeople.length === 0 && (
+              <div className="text-center py-10 text-sm font-bold text-gray-400">
+                {filter === 'owed' ? 'Nadie te debe nada ahora mismo' : 'No debes nada a nadie'}
+              </div>
+            )}
+
+            {visiblePeople.map((p) => {
+              const sm = summarize(p.entries, filter);
+              return (
+                <button
+                  key={p.userId}
+                  onClick={() => openPerson(p)}
+                  className="w-full flex items-center gap-3 bg-white border border-gray-100 rounded-2xl p-3 text-left"
+                >
+                  <Avatar name={p.name} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-black text-gray-900 truncate">{p.name}</div>
+                    <div className="text-[11px] font-bold text-gray-500 truncate">
+                      {!p.friend
+                        ? 'No es tu amigo'
+                        : p.friend.alias
+                        ? p.realName
+                        : p.entries.length > 0
+                        ? `${p.entries.length} ${p.entries.length === 1 ? 'ticket compartido' : 'tickets compartidos'}`
+                        : 'Sin tickets todavía'}
+                    </div>
+                  </div>
+                  <span className={chipClass(sm.kind)}>{sm.text}</span>
+                  <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                </button>
+              );
+            })}
           </>
         )}
 
         {!loading && !error && tab === 'inbox' && (
           <>
-            {incoming.length === 0 && outgoing.length === 0 && (
-              <div className="text-center py-12 text-sm font-bold text-gray-400">
-                No tienes avisos pendientes
-              </div>
-            )}
+            {incoming.length === 0 &&
+              outgoing.length === 0 &&
+              claims.length === 0 &&
+              reminders.length === 0 && (
+                <div className="text-center py-12 text-sm font-bold text-gray-400">
+                  No tienes avisos pendientes
+                </div>
+              )}
+
             {incoming.map((r) => (
               <div key={r.id} className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4">
                 <div className="flex justify-between items-start gap-2">
@@ -595,6 +958,55 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange }) => {
                 </div>
               </div>
             ))}
+
+            {claims.map(({ person, entry }) => (
+              <div key={`c-${entry.ticketId}-${person.userId}`} className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <div className="text-sm font-black text-gray-900">
+                  {person.name} dice que te ha pagado
+                </div>
+                <div className="text-xs font-semibold text-gray-600 mt-1">
+                  {formatMoney(entry.amount)} del ticket «{entry.merchant}». Confírmalo cuando lo hayas
+                  recibido.
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => confirmEntry(person, entry)}
+                    disabled={busy}
+                    className="flex-1 bg-green-600 text-white text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    onClick={() => reopenEntry(person, entry)}
+                    disabled={busy}
+                    className="flex-1 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
+                  >
+                    No lo he recibido
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {reminders.map(({ person, entry }) => (
+              <div key={`r-${entry.ticketId}-${person.userId}`} className="bg-white border border-gray-100 rounded-2xl p-4">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="text-sm font-black text-gray-900">Recordatorio de {person.name}</div>
+                  <div className="text-[10px] font-bold text-gray-400 whitespace-nowrap">
+                    {shortDate(entry.lastReminderAt)}
+                  </div>
+                </div>
+                <div className="text-xs font-semibold text-gray-600 mt-1">
+                  Te recuerda {formatMoney(entry.amount)} del ticket «{entry.merchant}».
+                </div>
+                <button
+                  onClick={() => openPerson(person)}
+                  className="mt-3 text-[11px] font-black uppercase tracking-widest text-indigo-700 border border-gray-200 rounded-xl px-4 py-2.5"
+                >
+                  Ver
+                </button>
+              </div>
+            ))}
+
             {outgoing.length > 0 && (
               <>
                 <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 pt-2">
