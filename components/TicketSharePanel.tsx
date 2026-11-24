@@ -120,6 +120,11 @@ const TicketSharePanel: React.FC<TicketSharePanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingKey, loading, error, members]);
 
+  // Gente que entró por enlace y eligió uno de los nombres libres del ticket.
+  const joinedByLink = participants
+    .filter((p) => !p.userId && memberByParticipant.has(p.id))
+    .map((p) => ({ p, m: memberByParticipant.get(p.id) as TicketMember }));
+
   const inviteUrl = inviteToken ? buildInviteUrl(inviteToken) : '';
 
   const copyLink = async () => {
@@ -189,64 +194,33 @@ const TicketSharePanel: React.FC<TicketSharePanelProps> = ({
             Los amigos que vincules verán el reparto completo, pero solo tú puedes editarlo.
           </p>
 
-          {participants.length > 0 && (
+          {joinedByLink.length > 0 && (
             <div className="space-y-2">
               <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                Vincular nombres a amigos
+                Entraron con el enlace
               </div>
-              {participants.map((p) => {
-                const m = memberByParticipant.get(p.id);
-                return (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between gap-2 bg-gray-50 rounded-2xl px-3 py-2.5"
+              {joinedByLink.map(({ p, m }) => (
+                <div
+                  key={m.userId}
+                  className="flex items-center justify-between gap-2 bg-gray-50 rounded-2xl px-3 py-2.5"
+                >
+                  <span className="text-sm font-bold text-gray-800 truncate">
+                    {nameOf(p)}
+                    <span className="text-[11px] font-semibold text-gray-400"> · {nameOfUser(m)}</span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Quitar acceso a ${nameOfUser(m)}`}
+                    onClick={() =>
+                      run(() => sharingService.removeMember(ticketId, m.userId), 'Acceso quitado')
+                    }
+                    className="w-8 h-8 rounded-full bg-white border border-gray-200 text-gray-500 flex items-center justify-center shrink-0"
                   >
-                    <span className="text-sm font-bold text-gray-800 truncate">{nameOf(p)}</span>
-                    {m ? (
-                      <span className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl pl-3 pr-1.5 py-1.5 text-xs font-black max-w-[55%]">
-                        <span className="truncate">{nameOfUser(m)}</span>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          aria-label={`Quitar acceso a ${nameOfUser(m)}`}
-                          onClick={() =>
-                            run(async () => {
-                              await sharingService.removeMember(ticketId, m.userId);
-                              if (p.userId) onUnlinkFriend?.(p.id);
-                            }, 'Acceso quitado')
-                          }
-                          className="p-0.5 hover:text-red-500"
-                        >
-                          <X size={14} />
-                        </button>
-                      </span>
-                    ) : p.userId ? (
-                      <span className="text-[11px] font-bold text-gray-400">Vinculando…</span>
-                    ) : (
-                      <select
-                        value=""
-                        disabled={busy || availableFriends.length === 0}
-                        onChange={(e) => {
-                          const uid = e.target.value;
-                          if (uid)
-                            run(() => sharingService.linkMember(ticketId, uid, p.id), 'Amigo vinculado');
-                        }}
-                        className={selectClass}
-                        aria-label={`Vincular a ${p.name} con un amigo`}
-                      >
-                        <option value="">
-                          {availableFriends.length === 0 ? 'Sin amigos libres' : 'Vincular amigo…'}
-                        </option>
-                        {availableFriends.map((f) => (
-                          <option key={f.friendId} value={f.friendId}>
-                            {friendLabel(f)}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                );
-              })}
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
