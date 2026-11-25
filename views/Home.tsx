@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle, ArrowDown, ArrowUp } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatMoney } from '../utils/format';
@@ -21,9 +21,6 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
   const todayLabel = today.charAt(0).toUpperCase() + today.slice(1);
 
   const allClear = !loading && !error && summary.owedTotal <= 0.005 && summary.oweTotal <= 0.005;
-
-  const cardBase =
-    'flex-1 min-w-0 min-h-[44px] text-left rounded-2xl p-4 border active-scale transition-opacity';
 
   return (
     <div className="bg-gray-50 min-h-full">
@@ -57,28 +54,94 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
 
         {!loading && !error && (
           <>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => onOpenFriends('owed')}
-                aria-label={`Te deben ${formatMoney(summary.owedTotal)}, ver en Amigos`}
-                className={`${cardBase} bg-green-50 border-green-200 ${summary.owedTotal <= 0.005 ? 'opacity-60' : ''}`}
+            <div
+              className="rounded-3xl p-5"
+              style={{ backgroundColor: '#312e81', color: '#ffffff' }}
+            >
+              <div
+                className="text-[10px] font-black uppercase tracking-widest mb-3"
+                style={{ color: '#a5b4fc' }}
               >
-                <div className="text-[10px] font-black uppercase tracking-widest text-green-700">Te deben</div>
-                <div className="text-2xl font-black text-green-800 mt-1">{formatMoney(summary.owedTotal)}</div>
-                <div className="text-[11px] font-bold text-green-700 mt-1">{peopleText(summary.owedPeople)}</div>
-              </button>
+                Balance de tickets
+              </div>
 
-              <button
-                type="button"
-                onClick={() => onOpenFriends('owe')}
-                aria-label={`Debes ${formatMoney(summary.oweTotal)}, ver en Amigos`}
-                className={`${cardBase} bg-red-50 border-red-200 ${summary.oweTotal <= 0.005 ? 'opacity-60' : ''}`}
-              >
-                <div className="text-[10px] font-black uppercase tracking-widest text-red-700">Debes</div>
-                <div className="text-2xl font-black text-red-800 mt-1">{formatMoney(summary.oweTotal)}</div>
-                <div className="text-[11px] font-bold text-red-700 mt-1">{peopleText(summary.owePeople)}</div>
-              </button>
+              <div className="flex items-stretch gap-3.5">
+                <button
+                  type="button"
+                  onClick={() => onOpenFriends('owed')}
+                  aria-label={`Te deben ${formatMoney(summary.owedTotal)}, ver en Amigos`}
+                  className="flex-1 min-w-0 min-h-[44px] text-left active-scale"
+                  style={{ opacity: summary.owedTotal <= 0.005 ? 0.6 : 1 }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: 'rgba(255,255,255,0.14)' }}
+                    >
+                      <ArrowDown size={13} strokeWidth={3} style={{ color: '#6ee7b7' }} />
+                    </span>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#c7d2fe' }}>
+                      Te deben
+                    </span>
+                  </div>
+                  <div className="text-[28px] leading-tight font-black tracking-tight mt-2">
+                    {formatMoney(summary.owedTotal)}
+                  </div>
+                  <div className="text-[11px] font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
+                    {peopleText(summary.owedPeople)}
+                  </div>
+                </button>
+
+                <div className="w-px" style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
+
+                <button
+                  type="button"
+                  onClick={() => onOpenFriends('owe')}
+                  aria-label={`Debes ${formatMoney(summary.oweTotal)}, ver en Amigos`}
+                  className="flex-1 min-w-0 min-h-[44px] text-left active-scale"
+                  style={{ opacity: summary.oweTotal <= 0.005 ? 0.6 : 1 }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: 'rgba(255,255,255,0.14)' }}
+                    >
+                      <ArrowUp size={13} strokeWidth={3} style={{ color: '#fca5a5' }} />
+                    </span>
+                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#c7d2fe' }}>
+                      Debes
+                    </span>
+                  </div>
+                  <div className="text-[28px] leading-tight font-black tracking-tight mt-2">
+                    {formatMoney(summary.oweTotal)}
+                  </div>
+                  <div className="text-[11px] font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
+                    {peopleText(summary.owePeople)}
+                  </div>
+                </button>
+              </div>
+
+              {/* Barra proporcional: cuánto pesa lo que te deben frente a lo que debes */}
+              <div className="flex gap-[3px] h-2.5 mt-4" aria-hidden="true">
+                {allClear ? (
+                  <span className="flex-1 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
+                ) : (
+                  <>
+                    {summary.owedTotal > 0.005 && (
+                      <span
+                        className="rounded-full"
+                        style={{ flexGrow: summary.owedTotal, flexBasis: 0, backgroundColor: '#34d399' }}
+                      />
+                    )}
+                    {summary.oweTotal > 0.005 && (
+                      <span
+                        className="rounded-full"
+                        style={{ flexGrow: summary.oweTotal, flexBasis: 0, backgroundColor: '#f87171' }}
+                      />
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
             {allClear && (
