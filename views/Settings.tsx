@@ -4,7 +4,7 @@ import { db } from '../db';
 import { 
   Download, Upload, Trash2, ShieldCheck, 
   LogOut, Mail,
-  Sun, Moon, Monitor, Palette, Users, Pencil, Check, X, Ban
+  Sun, Moon, Monitor, Palette, Users, Pencil, Check, X, Ban, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { friendsService, MyProfile, BlockedUser } from '../friendsService';
 import { useAuth } from '../src/contexts/AuthContext';
@@ -21,6 +21,7 @@ const Settings: React.FC = () => {
   const [profileBusy, setProfileBusy] = useState(false);
   const [blocked, setBlocked] = useState<BlockedUser[]>([]);
   const [blockedError, setBlockedError] = useState<string | null>(null);
+  const [screen, setScreen] = useState<'main' | 'blocked'>('main');
 
   const loadBlocked = () =>
     friendsService
@@ -119,6 +120,50 @@ const Settings: React.FC = () => {
       window.location.reload();
     }
   };
+
+  if (screen === 'blocked') {
+    return (
+      <div className="bg-gray-50 min-h-full">
+        <div className="bg-white border-b border-gray-100 px-4 py-3.5">
+          <div className="flex items-center gap-3 min-h-[44px]">
+            <button onClick={() => setScreen('main')} aria-label="Volver a Ajustes">
+              <ChevronLeft size={24} className="text-gray-900" />
+            </button>
+            <h1 className="text-base font-black text-gray-900">Usuarios bloqueados</h1>
+          </div>
+        </div>
+        <div className="p-4 space-y-2 pb-24">
+          <p className="text-[11px] font-semibold text-gray-500 mb-2">
+            Las personas bloqueadas no pueden enviarte solicitudes de amistad. Al desbloquear a alguien no
+            volvéis a ser amigos automáticamente.
+          </p>
+          {blockedError && (
+            <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
+              {blockedError}
+            </p>
+          )}
+          {!blockedError && blocked.length === 0 && (
+            <p className="text-xs font-semibold text-gray-500 py-4 text-center">No has bloqueado a nadie.</p>
+          )}
+          {blocked.map((b) => (
+            <div
+              key={b.userId}
+              className="flex items-center justify-between gap-2 bg-white border border-gray-100 rounded-2xl px-3 py-2.5"
+            >
+              <span className="text-sm font-bold text-gray-800 truncate">{b.displayName}</span>
+              <button
+                type="button"
+                onClick={() => unblock(b)}
+                className="shrink-0 min-h-[34px] px-3 rounded-xl border border-gray-200 bg-white text-gray-700 text-[10px] font-black uppercase tracking-wide"
+              >
+                Desbloquear
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 bg-gray-50 min-h-full">
@@ -264,39 +309,22 @@ const Settings: React.FC = () => {
           </div>
         </section>
 
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-4 border-b border-gray-50">
-            <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
-              <Ban size={18} className="text-indigo-600" />
+        <button
+          type="button"
+          onClick={() => setScreen('blocked')}
+          className="w-full flex items-center gap-3 bg-white rounded-2xl shadow-sm border border-gray-100 p-4 text-left active-scale"
+        >
+          <Ban size={18} className="text-indigo-600 shrink-0" />
+          <span className="flex-1 min-w-0">
+            <span className="block font-bold text-gray-900 uppercase text-[10px] tracking-widest">
               Usuarios bloqueados
-            </h3>
-          </div>
-          <div className="p-4 space-y-2">
-            {blockedError && (
-              <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
-                {blockedError}
-              </p>
-            )}
-            {!blockedError && blocked.length === 0 && (
-              <p className="text-xs font-semibold text-gray-500">No has bloqueado a nadie.</p>
-            )}
-            {blocked.map((b) => (
-              <div
-                key={b.userId}
-                className="flex items-center justify-between gap-2 bg-gray-50 rounded-2xl px-3 py-2.5"
-              >
-                <span className="text-sm font-bold text-gray-800 truncate">{b.displayName}</span>
-                <button
-                  type="button"
-                  onClick={() => unblock(b)}
-                  className="shrink-0 min-h-[34px] px-3 rounded-xl border border-gray-200 bg-white text-gray-700 text-[10px] font-black uppercase tracking-wide"
-                >
-                  Desbloquear
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
+            </span>
+            <span className="block text-xs font-semibold text-gray-500 mt-0.5">
+              {blockedError ? 'No disponible' : blocked.length === 0 ? 'Nadie bloqueado' : `${blocked.length} ${blocked.length === 1 ? 'persona' : 'personas'}`}
+            </span>
+          </span>
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        </button>
 
         <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-4 border-b border-gray-50">
