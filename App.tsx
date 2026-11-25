@@ -42,6 +42,9 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [pendingFriendRequests, setPendingFriendRequests] = useState(0);
   const [selectedSharedId, setSelectedSharedId] = useState<string | undefined>();
+  // Al abrir un ticket desde el detalle de un amigo, "atrás" vuelve a ese amigo.
+  const [returnToFriend, setReturnToFriend] = useState<string | null>(null);
+  const [friendsInitialId, setFriendsInitialId] = useState<string | undefined>();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     // Un enlace de invitación llega como ?invite=TOKEN. Se guarda para sobrevivir al inicio de sesión.
     const params = new URLSearchParams(window.location.search);
@@ -129,6 +132,16 @@ const App: React.FC = () => {
       active = false;
     };
   }, [user, view]);
+
+  const leaveTicket = () => {
+    if (returnToFriend) {
+      setFriendsInitialId(returnToFriend);
+      setReturnToFriend(null);
+      setView('friends');
+    } else {
+      setView('list');
+    }
+  };
 
   const navigateToTicket = (id: string) => {
     setIsListSelectionMode(false);
@@ -241,7 +254,7 @@ const App: React.FC = () => {
             onBack={() => {
               setDraftTicket(undefined);
               setSelectedTicketId(undefined);
-              setView('list');
+              leaveTicket();
             }}
           />
         ) : null;
@@ -251,7 +264,7 @@ const App: React.FC = () => {
             ticketId={selectedSharedId}
             onBack={() => {
               setSelectedSharedId(undefined);
-              setView('list');
+              leaveTicket();
             }}
           />
         ) : null;
@@ -259,9 +272,16 @@ const App: React.FC = () => {
         return (
           <Friends
             onPendingCountChange={setPendingFriendRequests}
-            onOpenShared={(id) => {
+            initialPersonId={friendsInitialId}
+            onInitialConsumed={() => setFriendsInitialId(undefined)}
+            onOpenShared={(id, personId) => {
+              setReturnToFriend(personId || null);
               setSelectedSharedId(id);
               setView('shared');
+            }}
+            onOpenOwn={(id, personId) => {
+              setReturnToFriend(personId);
+              navigateToTicket(id);
             }}
           />
         );

@@ -14,6 +14,7 @@ import {
   Inbox,
   Ban,
   UserMinus,
+  MoreVertical,
   Smartphone,
   Bell,
 } from 'lucide-react';
@@ -49,8 +50,13 @@ type Filter = 'all' | 'owed' | 'owe';
 interface FriendsProps {
   /** Avisa a la app de lo que requiere tu atención (solicitudes y pagos por confirmar). */
   onPendingCountChange?: (count: number) => void;
-  /** Abre un ticket que han compartido contigo. */
-  onOpenShared?: (ticketId: string) => void;
+  /** Abre un ticket que han compartido contigo. personId: desde qué amigo se abrió, para volver a él. */
+  onOpenShared?: (ticketId: string, personId?: string) => void;
+  /** Abre un ticket tuyo desde el detalle de un amigo. */
+  onOpenOwn?: (ticketId: string, personId: string) => void;
+  /** Detalle de amigo que se muestra al montar (al volver de abrir un ticket). */
+  initialPersonId?: string;
+  onInitialConsumed?: () => void;
 }
 
 /** Una persona con la que tengo trato: un amigo, o alguien que solo comparte tickets. */
@@ -118,8 +124,14 @@ function summarize(
   return { text: 'Al día', kind: 'neutral' };
 }
 
-const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared }) => {
-  const [screen, setScreen] = useState<Screen>('list');
+const Friends: React.FC<FriendsProps> = ({
+  onPendingCountChange,
+  onOpenShared,
+  onOpenOwn,
+  initialPersonId,
+  onInitialConsumed,
+}) => {
+  const [screen, setScreen] = useState<Screen>(initialPersonId ? 'detail' : 'list');
   const [tab, setTab] = useState<Tab>('friends');
   const [filter, setFilter] = useState<Filter>('all');
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -131,7 +143,14 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialPersonId || null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    if (initialPersonId) onInitialConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [toast, setToast] = useState('');
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -246,6 +265,8 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
   const openPerson = (p: Person) => {
     setSelectedId(p.userId);
     setEditingAlias(false);
+    setMenuOpen(false);
+    setShowAll(false);
     setScreen('detail');
   };
 
@@ -253,6 +274,7 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
     setScreen('list');
     setSelectedId(null);
     setEditingAlias(false);
+    setMenuOpen(false);
   };
 
   const saveAlias = async () => {
@@ -282,6 +304,12 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
       return;
     await run(() => friendsService.blockUser(selected.friend!.friendId), 'Usuario bloqueado');
     backToList();
+  };
+
+  const openEntry = (p: Person, e: BalanceEntry) => {
+    // Si debo yo, el ticket es del amigo (vista compartida). Si me debe, el ticket es mío.
+    if (e.direction === 'iOwe') onOpenShared?.(e.ticketId, p.userId);
+    else onOpenOwn?.(e.ticketId, p.userId);
   };
 
   // ----- Pagos -----
@@ -571,6 +599,8 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
   // ---------- Ficha ----------
   if (screen === 'detail' && selected) {
     const open = selected.entries.filter(isOpen);
+    const visibleEntries = showAll ? selected.entries : open;
+    const hiddenCount = selected.entries.length - open.length;
     const owed = sumOpen(selected.entries, 'theyOwe');
     const owe = sumOpen(selected.entries, 'iOwe');
     const net = owed - owe;
@@ -679,6 +709,44 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
                 </>
               )}
             </div>
+            {selected.friend && !editingAlias && (
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setMenuOpen((o) => !o)}
+                  aria-label="Más opciones"
+                  aria-expanded={menuOpen}
+                  className="w-9 h-9 rounded-full bg-gray-100 text-gray-700 flex items-center justify-center"
+                >
+                  <MoreVertical size={18} />
+                </button>
+                {menuOpen && (
+                  <>
+                    <button
+                      aria-label="Cerrar menú"
+                      className="fixed inset-0 z-30 cursor-default"
+                      onClick={() => setMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 top-11 z-40 w-52 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden">
+                      <button
+                        onClick={() => { setMenuOpen(false); removeFriend(); }}
+                        disabled={busy}
+                        className="w-full flex items-center gap-2.5 px-4 py-3.5 text-left text-xs font-black text-gray-700 uppercase tracking-wide active:bg-gray-50"
+                      >
+                        <UserMinus size={15} /> Eliminar amigo
+                      </button>
+                      <div className="h-px bg-gray-100" />
+                      <button
+                        onClick={() => { setMenuOpen(false); blockFriend(); }}
+                        disabled={busy}
+                        className="w-full flex items-center gap-2.5 px-4 py-3.5 text-left text-xs font-black text-red-600 uppercase tracking-wide active:bg-red-50"
+                      >
+                        <Ban size={15} /> Bloquear
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -706,15 +774,20 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
 
           <div>
             <div className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">
-              Tickets compartidos
+              {showAll ? 'Todos los tickets compartidos' : 'Tickets abiertos'}
             </div>
             {selected.entries.length === 0 && (
               <p className="text-xs font-semibold text-gray-400 py-2">
                 Todavía no compartís ningún ticket con importes.
               </p>
             )}
+            {selected.entries.length > 0 && visibleEntries.length === 0 && (
+              <p className="text-xs font-semibold text-gray-500 py-2">
+                No hay nada pendiente con {selected.name}.
+              </p>
+            )}
             <div className="space-y-2">
-              {selected.entries.map((e) => {
+              {visibleEntries.map((e) => {
                 const mine = e.direction === 'iOwe';
                 let stLabel: string;
                 let stClass: string;
@@ -743,7 +816,12 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
                 }
                 return (
                   <div key={e.ticketId} className="bg-white border border-gray-100 rounded-2xl p-3">
-                    <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => openEntry(selected, e)}
+                      aria-label={`Abrir el ticket ${e.merchant}`}
+                      className="w-full flex items-center gap-2.5 text-left"
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-black text-gray-900 truncate">{e.merchant}</div>
                         <div className="text-[11px] font-bold text-gray-500">
@@ -762,7 +840,8 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
                         {mine ? '-' : '+'}
                         {formatMoney(e.amount)}
                       </div>
-                    </div>
+                      <ChevronRight size={16} className="text-gray-300 shrink-0" />
+                    </button>
                     <div className="mt-2.5 flex items-center gap-2 flex-wrap">
                       <span
                         className={`text-[10px] font-black uppercase tracking-wide rounded-full px-2.5 py-1.5 ${stClass}`}
@@ -792,26 +871,16 @@ const Friends: React.FC<FriendsProps> = ({ onPendingCountChange, onOpenShared })
                 );
               })}
             </div>
+            {(hiddenCount > 0 || showAll) && selected.entries.length > 0 && hiddenCount > 0 && (
+              <button
+                onClick={() => setShowAll((v) => !v)}
+                className="w-full mt-3 py-3 rounded-xl border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest"
+              >
+                {showAll ? 'Ocultar historial' : `Ver historial (${hiddenCount})`}
+              </button>
+            )}
           </div>
 
-          {selected.friend && (
-            <div className="flex gap-2">
-              <button
-                onClick={removeFriend}
-                disabled={busy}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 bg-white text-gray-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-              >
-                <UserMinus size={14} /> Eliminar amigo
-              </button>
-              <button
-                onClick={blockFriend}
-                disabled={busy}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-red-200 bg-white text-red-600 text-[11px] font-black uppercase tracking-widest rounded-xl py-3"
-              >
-                <Ban size={14} /> Bloquear
-              </button>
-            </div>
-          )}
         </div>
         {toastEl}
       </div>

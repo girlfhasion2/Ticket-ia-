@@ -14,6 +14,12 @@ export interface Friend {
   since: string | null;
 }
 
+export interface BlockedUser {
+  userId: string;
+  displayName: string;
+  blockedAt: string | null;
+}
+
 export interface FriendRequest {
   id: string;
   direction: 'incoming' | 'outgoing';
@@ -142,6 +148,21 @@ export const friendsService = {
 
   async blockUser(userId: string): Promise<void> {
     await rpc<void>('block_user', { p_user: userId });
+  },
+
+  async unblockUser(userId: string): Promise<void> {
+    await rpc<void>('unblock_user', { p_user: userId });
+  },
+
+  async listBlocked(): Promise<BlockedUser[]> {
+    const rows = await rpc<
+      { user_id: string; display_name: string; blocked_at: string | null }[]
+    >('list_blocked');
+    return (rows || []).map((r) => ({
+      userId: r.user_id,
+      displayName: r.display_name,
+      blockedAt: r.blocked_at,
+    }));
   },
 
   /** Texto vacío = quitar el apodo. */

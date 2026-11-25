@@ -4,9 +4,9 @@ import { db } from '../db';
 import { 
   Download, Upload, Trash2, ShieldCheck, 
   LogOut, Mail,
-  Sun, Moon, Monitor, Palette, Users, Pencil, Check, X
+  Sun, Moon, Monitor, Palette, Users, Pencil, Check, X, Ban
 } from 'lucide-react';
-import { friendsService, MyProfile } from '../friendsService';
+import { friendsService, MyProfile, BlockedUser } from '../friendsService';
 import { useAuth } from '../src/contexts/AuthContext';
 import { ThemeMode, getStoredTheme, setTheme } from '../utils/theme';
 
@@ -19,6 +19,31 @@ const Settings: React.FC = () => {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [profileBusy, setProfileBusy] = useState(false);
+  const [blocked, setBlocked] = useState<BlockedUser[]>([]);
+  const [blockedError, setBlockedError] = useState<string | null>(null);
+
+  const loadBlocked = () =>
+    friendsService
+      .listBlocked()
+      .then((b) => {
+        setBlocked(b);
+        setBlockedError(null);
+      })
+      .catch((e: any) => setBlockedError(e?.message || 'No se pudo cargar la lista.'));
+
+  useEffect(() => {
+    loadBlocked();
+  }, []);
+
+  const unblock = async (b: BlockedUser) => {
+    if (!window.confirm(`¿Desbloquear a ${b.displayName}? No volveréis a ser amigos automáticamente.`)) return;
+    try {
+      await friendsService.unblockUser(b.userId);
+      await loadBlocked();
+    } catch (e: any) {
+      setBlockedError(e?.message || 'No se pudo desbloquear.');
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -236,6 +261,40 @@ const Settings: React.FC = () => {
                 </button>
               </>
             )}
+          </div>
+        </section>
+
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-4 border-b border-gray-50">
+            <h3 className="font-bold text-gray-900 flex items-center gap-2 uppercase text-[10px] tracking-widest">
+              <Ban size={18} className="text-indigo-600" />
+              Usuarios bloqueados
+            </h3>
+          </div>
+          <div className="p-4 space-y-2">
+            {blockedError && (
+              <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                {blockedError}
+              </p>
+            )}
+            {!blockedError && blocked.length === 0 && (
+              <p className="text-xs font-semibold text-gray-500">No has bloqueado a nadie.</p>
+            )}
+            {blocked.map((b) => (
+              <div
+                key={b.userId}
+                className="flex items-center justify-between gap-2 bg-gray-50 rounded-2xl px-3 py-2.5"
+              >
+                <span className="text-sm font-bold text-gray-800 truncate">{b.displayName}</span>
+                <button
+                  type="button"
+                  onClick={() => unblock(b)}
+                  className="shrink-0 min-h-[34px] px-3 rounded-xl border border-gray-200 bg-white text-gray-700 text-[10px] font-black uppercase tracking-wide"
+                >
+                  Desbloquear
+                </button>
+              </div>
+            ))}
           </div>
         </section>
 
