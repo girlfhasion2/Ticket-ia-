@@ -5,6 +5,7 @@ import { Ticket, AppState, TicketSortConfig } from './types';
 import TicketList from './views/TicketList';
 import TicketDetail from './views/TicketDetail';
 import Settings from './views/Settings';
+import HomeView from './views/Home';
 import Friends from './views/Friends';
 import SharedTicketView from './views/SharedTicketView';
 import JoinInvite from './views/JoinInvite';
@@ -14,7 +15,7 @@ import Auth from './views/Auth';
 import ResetPassword from './views/ResetPassword';
 import { useAuth } from './src/contexts/AuthContext';
 import { supabase, supabaseReady, wasRecoveryDetected } from './src/lib/supabase';
-import { Home, Settings as SettingsIcon, PlusCircle, RefreshCw, Users } from 'lucide-react';
+import { Home, Receipt, Settings as SettingsIcon, PlusCircle, RefreshCw, Users } from 'lucide-react';
 
 function hasRecoveryHash(): boolean {
   const hash = window.location.hash;
@@ -31,7 +32,7 @@ const App: React.FC = () => {
   const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(
     () => hasRecoveryHash() || wasRecoveryDetected()
   );
-  const [view, setView] = useState<AppState['view']>('list');
+  const [view, setView] = useState<AppState['view']>('home');
   const [selectedTicketId, setSelectedTicketId] = useState<string | undefined>();
   const [draftTicket, setDraftTicket] = useState<Ticket | undefined>();
   const [isListSelectionMode, setIsListSelectionMode] = useState(false);
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   // Al abrir un ticket desde el detalle de un amigo, "atrás" vuelve a ese amigo.
   const [returnToFriend, setReturnToFriend] = useState<string | null>(null);
   const [friendsInitialId, setFriendsInitialId] = useState<string | undefined>();
+  const [friendsInitialFilter, setFriendsInitialFilter] = useState<'owed' | 'owe' | undefined>();
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     // Un enlace de invitación llega como ?invite=TOKEN. Se guarda para sobrevivir al inicio de sesión.
     const params = new URLSearchParams(window.location.search);
@@ -106,7 +108,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!user) {
-      setView('list');
+      setView('home');
       setSelectedTicketId(undefined);
       setDraftTicket(undefined);
       setIsListSelectionMode(false);
@@ -230,6 +232,15 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch (view) {
+      case 'home':
+        return (
+          <HomeView
+            onOpenFriends={(filter) => {
+              setFriendsInitialFilter(filter);
+              setView('friends');
+            }}
+          />
+        );
       case 'list':
         return (
           <TicketList
@@ -274,6 +285,8 @@ const App: React.FC = () => {
             onPendingCountChange={setPendingFriendRequests}
             initialPersonId={friendsInitialId}
             onInitialConsumed={() => setFriendsInitialId(undefined)}
+            initialFilter={friendsInitialFilter}
+            onInitialFilterConsumed={() => setFriendsInitialFilter(undefined)}
             onOpenShared={(id, personId) => {
               setReturnToFriend(personId || null);
               setSelectedSharedId(id);
@@ -313,38 +326,47 @@ const App: React.FC = () => {
       </main>
 
       {view !== 'detail' && view !== 'shared' && !(view === 'list' && isListSelectionMode) && (
-        <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-6 py-3 flex justify-around items-center z-50">
-          <button 
-            onClick={() => setView('list')}
-            className={`flex flex-col items-center gap-1 transition-colors ${view === 'list' ? 'text-indigo-600' : 'text-gray-400'}`}
+        <nav className="fixed bottom-0 w-full max-w-2xl bg-white border-t border-gray-200 px-2 py-3 flex justify-around items-center z-50">
+          <button
+            onClick={() => setView('home')}
+            className={`flex flex-col items-center gap-1 min-w-[60px] transition-colors ${view === 'home' ? 'text-indigo-600' : 'text-gray-400'}`}
           >
             <Home size={24} />
+            <span className="text-[10px] font-bold uppercase tracking-widest">Inicio</span>
+          </button>
+
+          <button
+            onClick={() => setView('list')}
+            className={`flex flex-col items-center gap-1 min-w-[60px] transition-colors ${view === 'list' ? 'text-indigo-600' : 'text-gray-400'}`}
+          >
+            <Receipt size={24} />
             <span className="text-[10px] font-bold uppercase tracking-widest">Tickets</span>
           </button>
 
-          <button 
+          <button
+            onClick={createNewTicket}
+            aria-label="Nuevo ticket"
+            className="flex flex-col items-center gap-1 -mt-10 bg-indigo-600 text-white p-4 rounded-full shadow-2xl active-scale border-4 border-white transition-transform"
+          >
+            <PlusCircle size={32} />
+          </button>
+
+          <button
             onClick={() => setView('friends')}
-            className={`relative flex flex-col items-center gap-1 transition-colors ${view === 'friends' ? 'text-indigo-600' : 'text-gray-400'}`}
+            className={`relative flex flex-col items-center gap-1 min-w-[60px] transition-colors ${view === 'friends' ? 'text-indigo-600' : 'text-gray-400'}`}
           >
             <Users size={24} />
             {pendingFriendRequests > 0 && (
-              <span className="absolute -top-1 right-0 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
+              <span className="absolute -top-1 right-2 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center">
                 {pendingFriendRequests}
               </span>
             )}
             <span className="text-[10px] font-bold uppercase tracking-widest">Amigos</span>
           </button>
-          
-          <button 
-            onClick={createNewTicket}
-            className="flex flex-col items-center gap-1 -mt-10 bg-indigo-600 text-white p-4 rounded-full shadow-2xl active-scale border-4 border-white transition-transform"
-          >
-            <PlusCircle size={32} />
-          </button>
-          
-          <button 
+
+          <button
             onClick={() => setView('settings')}
-            className={`flex flex-col items-center gap-1 transition-colors ${view === 'settings' ? 'text-indigo-600' : 'text-gray-400'}`}
+            className={`flex flex-col items-center gap-1 min-w-[60px] transition-colors ${view === 'settings' ? 'text-indigo-600' : 'text-gray-400'}`}
           >
             <SettingsIcon size={24} />
             <span className="text-[10px] font-bold uppercase tracking-widest">Ajustes</span>

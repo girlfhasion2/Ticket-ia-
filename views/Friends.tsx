@@ -57,6 +57,9 @@ interface FriendsProps {
   /** Detalle de amigo que se muestra al montar (al volver de abrir un ticket). */
   initialPersonId?: string;
   onInitialConsumed?: () => void;
+  /** Filtro con el que se abre la lista (desde Inicio). */
+  initialFilter?: Filter;
+  onInitialFilterConsumed?: () => void;
 }
 
 /** Una persona con la que tengo trato: un amigo, o alguien que solo comparte tickets. */
@@ -130,10 +133,12 @@ const Friends: React.FC<FriendsProps> = ({
   onOpenOwn,
   initialPersonId,
   onInitialConsumed,
+  initialFilter,
+  onInitialFilterConsumed,
 }) => {
   const [screen, setScreen] = useState<Screen>(initialPersonId ? 'detail' : 'list');
   const [tab, setTab] = useState<Tab>('friends');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [filter, setFilter] = useState<Filter>(initialFilter || 'all');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [owned, setOwned] = useState<OwnedSharedTicket[]>([]);
@@ -149,6 +154,7 @@ const Friends: React.FC<FriendsProps> = ({
 
   useEffect(() => {
     if (initialPersonId) onInitialConsumed?.();
+    if (initialFilter) onInitialFilterConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [toast, setToast] = useState('');
