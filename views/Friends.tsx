@@ -94,11 +94,11 @@ const Avatar: React.FC<{ name: string; size?: number }> = ({ name, size = 42 }) 
 const chipClass = (kind: 'neutral' | 'owed' | 'owe' | 'wait') =>
   `text-xs font-black rounded-xl px-2.5 py-1.5 whitespace-nowrap ${
     kind === 'owed'
-      ? 'bg-green-50 text-green-700'
+      ? 'bg-sky-50 text-sky-700'
       : kind === 'owe'
-      ? 'bg-red-50 text-red-600'
-      : kind === 'wait'
       ? 'bg-amber-50 text-amber-700'
+      : kind === 'wait'
+      ? 'bg-indigo-50 text-indigo-700'
       : 'bg-gray-100 text-gray-500'
   }`;
 
@@ -618,7 +618,7 @@ const Friends: React.FC<FriendsProps> = ({
     let value = formatMoney(open.length > 0 ? Math.abs(net) : 0);
     let note = '';
     if (allSent) {
-      boxClass = 'bg-amber-50 text-amber-700 border border-amber-200';
+      boxClass = 'bg-indigo-50 text-indigo-700 border border-indigo-200';
       if (dirs.has('iOwe')) {
         label = `Pago enviado a ${selected.name}`;
         note = `Esperando a que ${selected.name} lo confirme. Hasta entonces no cuenta como pagado.`;
@@ -629,11 +629,11 @@ const Friends: React.FC<FriendsProps> = ({
         value = formatMoney(owed);
       }
     } else if (net > 0.005) {
-      boxClass = 'bg-green-50 text-green-700 border border-green-100';
+      boxClass = 'bg-sky-50 text-sky-700 border border-sky-200';
       label = `${selected.name} te debe`;
       value = formatMoney(net);
     } else if (net < -0.005) {
-      boxClass = 'bg-red-50 text-red-600 border border-red-200';
+      boxClass = 'bg-amber-50 text-amber-700 border border-amber-200';
       label = `Le debes a ${selected.name}`;
       value = formatMoney(-net);
     }
@@ -804,7 +804,7 @@ const Friends: React.FC<FriendsProps> = ({
                   stClass = 'bg-green-100 text-green-700';
                   if (!mine) secondary = { label: 'Deshacer', onClick: () => reopenEntry(selected, e) };
                 } else if (e.status === 'sent') {
-                  stClass = 'bg-amber-100 text-amber-700';
+                  stClass = 'bg-indigo-100 text-indigo-700';
                   if (mine) {
                     stLabel = `Enviado · esperando a ${selected.name}`;
                     secondary = { label: 'Deshacer', onClick: () => undoEntry(e) };
@@ -839,8 +839,8 @@ const Friends: React.FC<FriendsProps> = ({
                           e.status === 'confirmed'
                             ? 'text-gray-400 line-through'
                             : mine
-                            ? 'text-red-600'
-                            : 'text-green-700'
+                            ? 'text-amber-700'
+                            : 'text-sky-700'
                         }`}
                       >
                         {mine ? '-' : '+'}
@@ -894,13 +894,13 @@ const Friends: React.FC<FriendsProps> = ({
   }
 
   // ---------- Lista ----------
-  const filterCard = (on: boolean, color: 'indigo' | 'green' | 'red') =>
+  const filterCard = (on: boolean, color: 'indigo' | 'sky' | 'amber') =>
     `flex-1 min-w-0 text-left rounded-2xl p-3 border-2 ${
       on
-        ? color === 'green'
-          ? 'bg-green-50 border-green-600'
-          : color === 'red'
-          ? 'bg-red-50 border-red-500'
+        ? color === 'sky'
+          ? 'bg-sky-50 border-sky-600'
+          : color === 'amber'
+          ? 'bg-amber-50 border-amber-500'
           : 'bg-indigo-50 border-indigo-600'
         : 'bg-white border-gray-100'
     }`;
@@ -962,17 +962,17 @@ const Friends: React.FC<FriendsProps> = ({
               </button>
               <button
                 onClick={() => setFilter(filter === 'owed' ? 'all' : 'owed')}
-                className={filterCard(filter === 'owed', 'green')}
+                className={filterCard(filter === 'owed', 'sky')}
               >
-                <div className="text-[10px] font-black uppercase tracking-widest text-green-700">Te deben</div>
-                <div className="text-lg font-black text-green-700 mt-0.5 truncate">{formatMoney(owedTotal)}</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-sky-700">Te deben</div>
+                <div className="text-lg font-black text-sky-700 mt-0.5 truncate">{formatMoney(owedTotal)}</div>
               </button>
               <button
                 onClick={() => setFilter(filter === 'owe' ? 'all' : 'owe')}
-                className={filterCard(filter === 'owe', 'red')}
+                className={filterCard(filter === 'owe', 'amber')}
               >
-                <div className="text-[10px] font-black uppercase tracking-widest text-red-600">Debes</div>
-                <div className="text-lg font-black text-red-600 mt-0.5 truncate">{formatMoney(oweTotal)}</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-amber-700">Debes</div>
+                <div className="text-lg font-black text-amber-700 mt-0.5 truncate">{formatMoney(oweTotal)}</div>
               </button>
             </div>
 

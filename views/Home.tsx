@@ -76,7 +76,6 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
   const owedOpen = summary.owedTotal > EPS;
   const oweOpen = summary.oweTotal > EPS;
   const allClear = !loading && !error && !owedOpen && !oweOpen;
-  const bothWays = owedOpen && oweOpen && Math.abs(summary.owedTotal - summary.oweTotal) < EPS;
 
   return (
     <div className="bg-gray-50 min-h-full">
@@ -150,11 +149,6 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
               />
             </div>
 
-            {bothWays && (
-              <p className="text-[11px] font-bold mt-3" style={{ color: '#c7d2fe' }}>
-                Hay pagos abiertos en los dos sentidos.
-              </p>
-            )}
           </div>
         )}
       </div>
