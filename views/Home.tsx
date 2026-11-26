@@ -1,5 +1,5 @@
 import React from 'react';
-import { RefreshCw, AlertCircle, ArrowDown, ArrowUp } from 'lucide-react';
+import { RefreshCw, AlertCircle, ArrowDown, ArrowUp, Check } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { formatMoney } from '../utils/format';
@@ -12,7 +12,60 @@ interface HomeProps {
   onOpenFriends: (filter: BalanceFilter) => void;
 }
 
-const peopleText = (n: number) => (n === 0 ? 'Nadie' : n === 1 ? '1 persona' : `${n} personas`);
+const EPS = 0.005;
+const paymentsText = (n: number) =>
+  n === 0 ? 'Ningún pago' : n === 1 ? '1 pago abierto' : `${n} pagos abiertos`;
+
+interface TileProps {
+  label: string;
+  amount: number;
+  count: number;
+  accent: string;
+  chip?: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
+/** Mismo tamaño y peso visual para las dos cuentas: ninguna es "la buena". */
+const Tile: React.FC<TileProps> = ({ label, amount, count, accent, chip, icon, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={`${label} ${formatMoney(amount)}, ${paymentsText(count)}, ver en Amigos`}
+    className="flex-1 min-w-0 min-h-[44px] text-left rounded-2xl p-3.5 active-scale"
+    style={{
+      backgroundColor: 'rgba(255,255,255,0.09)',
+      color: '#ffffff',
+      opacity: amount <= EPS ? 0.55 : 1,
+    }}
+  >
+    <div className="flex items-center gap-1.5">
+      <span
+        className="w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0"
+        style={{ backgroundColor: 'rgba(255,255,255,0.14)' }}
+      >
+        {icon}
+      </span>
+      <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#c7d2fe' }}>
+        {label}
+      </span>
+    </div>
+    <div className="text-[26px] leading-tight font-black tracking-tight mt-2 truncate">
+      {formatMoney(amount)}
+    </div>
+    <div className="text-[11px] font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
+      {paymentsText(count)}
+    </div>
+    {chip && (
+      <span
+        className="inline-block mt-2 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide"
+        style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: accent }}
+      >
+        {chip}
+      </span>
+    )}
+  </button>
+);
 
 const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
   const { summary, loading, error, reload } = useBalances();
@@ -20,7 +73,10 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
   const today = format(new Date(), "EEEE d 'de' MMMM", { locale: es });
   const todayLabel = today.charAt(0).toUpperCase() + today.slice(1);
 
-  const allClear = !loading && !error && summary.owedTotal <= 0.005 && summary.oweTotal <= 0.005;
+  const owedOpen = summary.owedTotal > EPS;
+  const oweOpen = summary.oweTotal > EPS;
+  const allClear = !loading && !error && !owedOpen && !oweOpen;
+  const bothWays = owedOpen && oweOpen && Math.abs(summary.owedTotal - summary.oweTotal) < EPS;
 
   return (
     <div className="bg-gray-50 min-h-full">
@@ -30,10 +86,6 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
       </header>
 
       <div className="p-4 space-y-3 pb-24">
-        <h2 className="text-[10px] font-black uppercase tracking-widest text-gray-400 px-1">
-          Balance de tickets
-        </h2>
-
         {loading && (
           <div className="flex justify-center py-10">
             <RefreshCw size={24} className="animate-spin text-indigo-600" />
@@ -52,104 +104,58 @@ const Home: React.FC<HomeProps> = ({ onOpenFriends }) => {
           </div>
         )}
 
-        {!loading && !error && (
-          <>
-            <div
-              className="rounded-3xl p-5"
-              style={{ backgroundColor: '#312e81', color: '#ffffff' }}
+        {!loading && !error && allClear && (
+          <div
+            className="rounded-3xl p-5 flex items-center gap-3.5"
+            style={{ backgroundColor: '#312e81', color: '#ffffff' }}
+          >
+            <span
+              className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+              style={{ backgroundColor: 'rgba(110,231,183,0.18)' }}
             >
-              <div
-                className="text-[10px] font-black uppercase tracking-widest mb-3"
-                style={{ color: '#a5b4fc' }}
-              >
-                Balance de tickets
-              </div>
-
-              <div className="flex items-stretch gap-3.5">
-                <button
-                  type="button"
-                  onClick={() => onOpenFriends('owed')}
-                  aria-label={`Te deben ${formatMoney(summary.owedTotal)}, ver en Amigos`}
-                  className="flex-1 min-w-0 min-h-[44px] text-left active-scale"
-                  style={{ opacity: summary.owedTotal <= 0.005 ? 0.6 : 1 }}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: 'rgba(255,255,255,0.14)' }}
-                    >
-                      <ArrowDown size={13} strokeWidth={3} style={{ color: '#6ee7b7' }} />
-                    </span>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#c7d2fe' }}>
-                      Te deben
-                    </span>
-                  </div>
-                  <div className="text-[28px] leading-tight font-black tracking-tight mt-2">
-                    {formatMoney(summary.owedTotal)}
-                  </div>
-                  <div className="text-[11px] font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
-                    {peopleText(summary.owedPeople)}
-                  </div>
-                </button>
-
-                <div className="w-px" style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
-
-                <button
-                  type="button"
-                  onClick={() => onOpenFriends('owe')}
-                  aria-label={`Debes ${formatMoney(summary.oweTotal)}, ver en Amigos`}
-                  className="flex-1 min-w-0 min-h-[44px] text-left active-scale"
-                  style={{ opacity: summary.oweTotal <= 0.005 ? 0.6 : 1 }}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="w-[22px] h-[22px] rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: 'rgba(255,255,255,0.14)' }}
-                    >
-                      <ArrowUp size={13} strokeWidth={3} style={{ color: '#fca5a5' }} />
-                    </span>
-                    <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#c7d2fe' }}>
-                      Debes
-                    </span>
-                  </div>
-                  <div className="text-[28px] leading-tight font-black tracking-tight mt-2">
-                    {formatMoney(summary.oweTotal)}
-                  </div>
-                  <div className="text-[11px] font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
-                    {peopleText(summary.owePeople)}
-                  </div>
-                </button>
-              </div>
-
-              {/* Barra proporcional: cuánto pesa lo que te deben frente a lo que debes */}
-              <div className="flex gap-[3px] h-2.5 mt-4" aria-hidden="true">
-                {allClear ? (
-                  <span className="flex-1 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
-                ) : (
-                  <>
-                    {summary.owedTotal > 0.005 && (
-                      <span
-                        className="rounded-full"
-                        style={{ flexGrow: summary.owedTotal, flexBasis: 0, backgroundColor: '#34d399' }}
-                      />
-                    )}
-                    {summary.oweTotal > 0.005 && (
-                      <span
-                        className="rounded-full"
-                        style={{ flexGrow: summary.oweTotal, flexBasis: 0, backgroundColor: '#f87171' }}
-                      />
-                    )}
-                  </>
-                )}
+              <Check size={24} strokeWidth={3} style={{ color: '#6ee7b7' }} />
+            </span>
+            <div>
+              <div className="text-lg font-black">Todo saldado</div>
+              <div className="text-xs font-bold mt-0.5" style={{ color: '#c7d2fe' }}>
+                No tienes pagos pendientes con nadie.
               </div>
             </div>
+          </div>
+        )}
 
-            {allClear && (
-              <p className="text-xs font-semibold text-gray-500 px-1">
-                Estás al día, no tienes pagos pendientes.
+        {!loading && !error && !allClear && (
+          <div className="rounded-3xl p-5" style={{ backgroundColor: '#312e81', color: '#ffffff' }}>
+            <div className="text-[10px] font-black uppercase tracking-widest" style={{ color: '#a5b4fc' }}>
+              Pagos pendientes
+            </div>
+
+            <div className="flex items-stretch gap-2.5 mt-3">
+              <Tile
+                label="Te deben"
+                amount={summary.owedTotal}
+                count={summary.owedCount}
+                accent="#7dd3fc"
+                chip={summary.toConfirmCount > 0 ? `${summary.toConfirmCount} por confirmar` : undefined}
+                icon={<ArrowDown size={13} strokeWidth={3} style={{ color: '#7dd3fc' }} />}
+                onClick={() => onOpenFriends('owed')}
+              />
+              <Tile
+                label="Debes"
+                amount={summary.oweTotal}
+                count={summary.oweCount}
+                accent="#fbbf24"
+                icon={<ArrowUp size={13} strokeWidth={3} style={{ color: '#fbbf24' }} />}
+                onClick={() => onOpenFriends('owe')}
+              />
+            </div>
+
+            {bothWays && (
+              <p className="text-[11px] font-bold mt-3" style={{ color: '#c7d2fe' }}>
+                Hay pagos abiertos en los dos sentidos.
               </p>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

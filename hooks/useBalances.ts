@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { sharingService, OwnedSharedTicket, SharedTicket } from '../sharingService';
-import { buildBalances, sumOpen, PersonBalance } from '../utils/balances';
+import { buildBalances, sumOpen, isOpen, PersonBalance } from '../utils/balances';
 
 export interface BalanceSummary {
   /** Total que otras personas me deben (solo deudas abiertas). */
@@ -10,6 +10,11 @@ export interface BalanceSummary {
   /** Personas con importe abierto en cada dirección. */
   owedPeople: number;
   owePeople: number;
+  /** Pagos abiertos en cada dirección. */
+  owedCount: number;
+  oweCount: number;
+  /** Pagos que me han marcado como enviados y falta que yo confirme. */
+  toConfirmCount: number;
 }
 
 const EPS = 0.005;
@@ -49,6 +54,9 @@ export function useBalances() {
     let oweTotal = 0;
     let owedPeople = 0;
     let owePeople = 0;
+    let owedCount = 0;
+    let oweCount = 0;
+    let toConfirmCount = 0;
     balances.forEach((b: PersonBalance) => {
       const owed = sumOpen(b.entries, 'theyOwe');
       const owe = sumOpen(b.entries, 'iOwe');
@@ -56,8 +64,17 @@ export function useBalances() {
       oweTotal += owe;
       if (owed > EPS) owedPeople += 1;
       if (owe > EPS) owePeople += 1;
+      b.entries.forEach(e => {
+        if (!isOpen(e) || e.amount <= EPS) return;
+        if (e.direction === 'theyOwe') {
+          owedCount += 1;
+          if (e.status === 'sent') toConfirmCount += 1;
+        } else {
+          oweCount += 1;
+        }
+      });
     });
-    return { owedTotal, oweTotal, owedPeople, owePeople };
+    return { owedTotal, oweTotal, owedPeople, owePeople, owedCount, oweCount, toConfirmCount };
   }, [balances]);
 
   return { balances, summary, loading, error, reload };
