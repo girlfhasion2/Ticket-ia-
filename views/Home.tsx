@@ -32,7 +32,7 @@ const Tile: React.FC<TileProps> = ({ label, amount, count, accent, chip, icon, o
     type="button"
     onClick={onClick}
     aria-label={`${label} ${formatMoney(amount)}, ${paymentsText(count)}, ver en Amigos`}
-    className="flex-1 min-w-0 min-h-[44px] text-left rounded-2xl p-3.5 active-scale"
+    className="flex-1 min-w-0 min-h-[44px] flex flex-col justify-start items-stretch text-left rounded-2xl p-3.5 active-scale"
     style={{
       backgroundColor: 'rgba(255,255,255,0.09)',
       color: '#ffffff',
@@ -58,7 +58,7 @@ const Tile: React.FC<TileProps> = ({ label, amount, count, accent, chip, icon, o
     </div>
     {chip && (
       <span
-        className="inline-block mt-2 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide"
+        className="self-start mt-2 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide"
         style={{ backgroundColor: 'rgba(255,255,255,0.12)', color: accent }}
       >
         {chip}
